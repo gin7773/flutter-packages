@@ -742,6 +742,9 @@ ${_argParser.usage}''';
       }
     }
 
+    // Generate FFI backend files if useFfi is enabled.
+    CppFfiGeneratorAdapter.generateFfiFiles(internalOptions, parseResults.root);
+
     return 0;
   }
 

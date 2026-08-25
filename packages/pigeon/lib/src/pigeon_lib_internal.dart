@@ -18,7 +18,10 @@ import 'package:pub_semver/pub_semver.dart';
 import 'ast.dart';
 import 'ast_generator.dart';
 import 'cpp/cpp_generator.dart';
+import 'cpp/cpp_ffi_generator.dart';
+import 'cpp/cpp_ffigen_config_generator.dart';
 import 'dart/dart_generator.dart';
+import 'dart/dart_ffi_generator.dart';
 import 'generator_tools.dart';
 import 'gobject/gobject_generator.dart';
 import 'java/java_generator.dart';
@@ -472,6 +475,141 @@ class CppGeneratorAdapter implements GeneratorAdapter {
     _errorOnInheritedClass(errors, languageString, root);
     return errors;
   }
+}
+
+/// A [GeneratorAdapter] that generates C++ FFI backend files.
+///
+/// This adapter generates three layers:
+/// 1. C ABI header and source (messages_ffi.h, messages.cc)
+/// 2. ffigen config script for low-level Dart binding
+/// 3. High-level Dart FFI wrapper
+class CppFfiGeneratorAdapter implements GeneratorAdapter {
+  /// Constructor for [CppFfiGeneratorAdapter].
+  const CppFfiGeneratorAdapter();
+
+  /// A string representing the name of the language being generated.
+  static const String languageString = 'C++ FFI';
+
+  @override
+  List<FileType> get fileTypeList => const <FileType>[FileType.na];
+
+  @override
+  void generate(StringSink sink, InternalPigeonOptions options, Root root, FileType fileType) {
+    // This adapter handles file generation internally.
+    // The sink parameter is not used here.
+  }
+
+  @override
+  IOSink? shouldGenerate(InternalPigeonOptions options, FileType fileType) {
+    // FFI generation is handled internally when useFfi is true.
+    // Return null to skip the standard generation flow.
+    return null;
+  }
+
+  @override
+  List<Error> validate(InternalPigeonOptions options, Root root) {
+    final errors = <Error>[];
+
+    // FFI-specific validation is handled in CppOptions validation.
+    // Add any additional FFI-specific validation here if needed.
+
+    return errors;
+  }
+
+  /// Generates FFI backend files when useFfi is true.
+  ///
+  /// This method is called from the main generation flow to generate:
+  /// 1. C ABI header (messages_ffi.h)
+  /// 2. C ABI source (messages.cc)
+  /// 3. ffigen config script
+  /// 4. Dart FFI wrapper
+  static void generateFfiFiles(InternalPigeonOptions options, Root root) {
+    if (options.cppOptions?.useFfi != true) {
+      return;
+    }
+
+    // Validate FFI configuration.
+    final cppOptions = options.cppOptions!;
+    if (cppOptions.ffiHeaderOut == null ||
+        cppOptions.ffiSourceOut == null ||
+        cppOptions.ffiBindingOut == null) {
+      stderr.writeln('Error: FFI backend requires ffiHeaderOut, ffiSourceOut, and ffiBindingOut');
+      return;
+    }
+
+    // Generate C++ FFI files (C ABI header, C++ HostApi header, C ABI source).
+    final ffiGenerator = CppFfiGenerator();
+    final ffiOptions = CppFfiOptions(
+      namespace: cppOptions.namespace,
+      copyrightHeader: options.copyrightHeader,
+      ffiHeaderOut: cppOptions.ffiHeaderOut!,
+      ffiSourceOut: cppOptions.ffiSourceOut!,
+      ffiBindingOut: cppOptions.ffiBindingOut!,
+      ffiConfigOut: cppOptions.ffiConfigOut,
+      symbolPrefix: cppOptions.symbolPrefix,
+      libraryMode: cppOptions.libraryMode,
+    );
+    ffiGenerator.generate(ffiOptions, root, dartPackageName: options.dartPackageName);
+
+    // Generate ffigen config script.
+    final configGenerator = CppFfigenConfigGenerator();
+    final configOptions = CppFfigenConfigOptions(
+      name: options.dartPackageName,
+      headerPath: cppOptions.ffiHeaderOut!,
+      outputPath: cppOptions.ffiBindingOut!,
+      scriptPath:
+          cppOptions.ffiConfigOut ??
+          'tool/pigeon/${options.input!.split('/').last.replaceAll('.dart', '')}_cpp_ffigen_config.dart',
+      configPath:
+          cppOptions.ffiConfigOut?.replaceAll('.dart', '.yaml') ??
+          'tool/pigeon/${options.input!.split('/').last.replaceAll('.dart', '')}_cpp_ffigen_config.yaml',
+      symbolPrefix: cppOptions.symbolPrefix ?? 'pigeon_',
+    );
+    final configScript = configGenerator.generateConfigScript(configOptions, root);
+    _writeFile(configOptions.scriptPath, configScript);
+
+    // Run ffigen to generate low-level Dart binding.
+    // Note: This requires ffigen to be installed.
+    // Users can also run the generated config script manually.
+    try {
+      final result = Process.runSync('dart', [
+        'run',
+        'ffigen',
+        '--config',
+        configOptions.configPath,
+      ], workingDirectory: Directory.current.path);
+      if (result.exitCode != 0) {
+        stderr.writeln('Warning: ffigen failed with exit code ${result.exitCode}');
+        stderr.writeln(result.stderr);
+      } else {
+        stdout.writeln('Generated FFI binding at: ${configOptions.outputPath}');
+      }
+    } catch (e) {
+      stderr.writeln('Warning: Failed to run ffigen. Please run manually:');
+      stderr.writeln('  dart run ffigen --config ${configOptions.configPath}');
+    }
+
+    // Generate high-level Dart FFI wrapper.
+    final dartFfiGenerator = DartFfiGenerator();
+    final dartFfiOptions = DartFfiOptions(
+      copyrightHeader: options.copyrightHeader,
+      ffiBindingPath: cppOptions.ffiBindingOut!,
+      dartOutPath:
+          cppOptions.dartOut ?? cppOptions.ffiBindingOut!.replaceAll('.g.ffi.dart', '.g.dart'),
+    );
+    final dartWrapper = dartFfiGenerator.generate(
+      dartFfiOptions,
+      root,
+      dartPackageName: options.dartPackageName,
+    );
+    _writeFile(dartFfiOptions.dartOutPath, dartWrapper);
+  }
+}
+
+void _writeFile(String filePath, String content) {
+  final file = File(filePath);
+  file.createSync(recursive: true);
+  file.writeAsStringSync(content);
 }
 
 /// A [GeneratorAdapter] that generates GObject source code.

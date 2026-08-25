@@ -9,6 +9,8 @@ import '../functional.dart';
 import '../generator.dart';
 import '../generator_tools.dart';
 import '../pigeon_lib.dart';
+import 'cpp_ffi_generator.dart';
+import 'shared/error_or_generator.dart';
 
 /// General comment opening token.
 const String _commentPrefix = '//';
@@ -51,6 +53,14 @@ class CppOptions {
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
+    this.useFfi = false,
+    this.ffiHeaderOut,
+    this.ffiSourceOut,
+    this.ffiBindingOut,
+    this.ffiConfigOut,
+    this.symbolPrefix,
+    this.libraryMode = FfiLibraryMode.process,
+    this.dartOut,
   });
 
   /// The path to the header that will get placed in the source file (example:
@@ -66,6 +76,40 @@ class CppOptions {
   /// The path to the output header file location.
   final String? headerOutPath;
 
+  /// Whether to generate C++ FFI backend code.
+  ///
+  /// When true, generates C ABI header, C++ HostApi interface, and Dart FFI bindings.
+  final bool useFfi;
+
+  /// Path to the C ABI header file (e.g., "messages_ffi.h").
+  ///
+  /// Required when [useFfi] is true.
+  final String? ffiHeaderOut;
+
+  /// Path to the C ABI source file (e.g., "messages.cc").
+  ///
+  /// Required when [useFfi] is true.
+  final String? ffiSourceOut;
+
+  /// Path to the Dart ffigen binding file (e.g., "messages.g.ffi.dart").
+  ///
+  /// Required when [useFfi] is true.
+  final String? ffiBindingOut;
+
+  /// Path to the ffigen config file (optional, defaults to tool/pigeon/).
+  final String? ffiConfigOut;
+
+  /// Symbol prefix for exported C functions.
+  ///
+  /// If not provided, derived from [namespace] automatically.
+  final String? symbolPrefix;
+
+  /// Library loading mode for Dart FFI.
+  final FfiLibraryMode libraryMode;
+
+  /// Path to the Dart output file (for FFI wrapper).
+  final String? dartOut;
+
   /// Creates a [CppOptions] from a Map representation where:
   /// `x = CppOptions.fromMap(x.toMap())`.
   static CppOptions fromMap(Map<String, Object> map) {
@@ -74,6 +118,13 @@ class CppOptions {
       namespace: map['namespace'] as String?,
       copyrightHeader: map['copyrightHeader'] as Iterable<String>?,
       headerOutPath: map['cppHeaderOut'] as String?,
+      useFfi: map['useFfi'] as bool? ?? false,
+      ffiHeaderOut: map['ffiHeaderOut'] as String?,
+      ffiSourceOut: map['ffiSourceOut'] as String?,
+      ffiBindingOut: map['ffiBindingOut'] as String?,
+      ffiConfigOut: map['ffiConfigOut'] as String?,
+      symbolPrefix: map['symbolPrefix'] as String?,
+      libraryMode: FfiLibraryMode.values.byName(map['libraryMode'] as String? ?? 'process'),
     );
   }
 
@@ -84,6 +135,13 @@ class CppOptions {
       if (headerIncludePath != null) 'headerIncludePath': headerIncludePath!,
       if (namespace != null) 'namespace': namespace!,
       if (copyrightHeader != null) 'copyrightHeader': copyrightHeader!,
+      if (useFfi) 'useFfi': useFfi,
+      if (ffiHeaderOut != null) 'ffiHeaderOut': ffiHeaderOut!,
+      if (ffiSourceOut != null) 'ffiSourceOut': ffiSourceOut!,
+      if (ffiBindingOut != null) 'ffiBindingOut': ffiBindingOut!,
+      if (ffiConfigOut != null) 'ffiConfigOut': ffiConfigOut!,
+      if (symbolPrefix != null) 'symbolPrefix': symbolPrefix!,
+      if (useFfi) 'libraryMode': libraryMode.name,
     };
     return result;
   }
@@ -107,6 +165,14 @@ class InternalCppOptions extends InternalOptions {
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
+    this.useFfi = false,
+    this.ffiHeaderOut,
+    this.ffiSourceOut,
+    this.ffiBindingOut,
+    this.ffiConfigOut,
+    this.symbolPrefix,
+    this.libraryMode = FfiLibraryMode.process,
+    this.dartOut,
   });
 
   /// Creates InternalCppOptions from CppOptions.
@@ -118,7 +184,15 @@ class InternalCppOptions extends InternalOptions {
   }) : headerIncludePath = options.headerIncludePath ?? path.basename(cppHeaderOut),
        namespace = options.namespace,
        copyrightHeader = options.copyrightHeader ?? copyrightHeader,
-       headerOutPath = options.headerOutPath;
+       headerOutPath = options.headerOutPath,
+       useFfi = options.useFfi,
+       ffiHeaderOut = options.ffiHeaderOut,
+       ffiSourceOut = options.ffiSourceOut,
+       ffiBindingOut = options.ffiBindingOut,
+       ffiConfigOut = options.ffiConfigOut,
+       symbolPrefix = options.symbolPrefix,
+       libraryMode = options.libraryMode,
+       dartOut = options.dartOut;
 
   /// The path to the header that will get placed in the source file (example:
   /// "foo.h").
@@ -138,6 +212,30 @@ class InternalCppOptions extends InternalOptions {
 
   /// The path to the output header file location.
   final String? headerOutPath;
+
+  /// Whether to generate C++ FFI backend code.
+  final bool useFfi;
+
+  /// Path to the C ABI header file (e.g., "messages_ffi.h").
+  final String? ffiHeaderOut;
+
+  /// Path to the C ABI source file (e.g., "messages.cc").
+  final String? ffiSourceOut;
+
+  /// Path to the Dart ffigen binding file (e.g., "messages.g.ffi.dart").
+  final String? ffiBindingOut;
+
+  /// Path to the ffigen config file (optional).
+  final String? ffiConfigOut;
+
+  /// Symbol prefix for exported C functions.
+  final String? symbolPrefix;
+
+  /// Library loading mode for Dart FFI.
+  final FfiLibraryMode libraryMode;
+
+  /// Path to the Dart output file (for FFI wrapper).
+  final String? dartOut;
 }
 
 /// Class that manages all Cpp code generation.
@@ -254,9 +352,9 @@ class CppHeaderGenerator extends StructuredGenerator<InternalCppOptions> {
     Indent indent, {
     required String dartPackageName,
   }) {
-    _writeFlutterError(indent);
+    ErrorOrGenerator.writeFlutterError(indent);
     if (root.containsHostApi) {
-      _writeErrorOr(
+      ErrorOrGenerator.writeErrorOr(
         indent,
         friends: root.apis
             .where((Api api) => api is AstFlutterApi || api is AstHostApi)
@@ -765,56 +863,6 @@ class CppHeaderGenerator extends StructuredGenerator<InternalCppOptions> {
       parameters: paramStrings,
     );
     indent.newln();
-  }
-
-  void _writeFlutterError(Indent indent) {
-    indent.format('''
-
-class FlutterError {
- public:
-\texplicit FlutterError(const std::string& code)
-\t\t: code_(code) {}
-\texplicit FlutterError(const std::string& code, const std::string& message)
-\t\t: code_(code), message_(message) {}
-\texplicit FlutterError(const std::string& code, const std::string& message, const ::flutter::EncodableValue& details)
-\t\t: code_(code), message_(message), details_(details) {}
-
-\tconst std::string& code() const { return code_; }
-\tconst std::string& message() const { return message_; }
-\tconst ::flutter::EncodableValue& details() const { return details_; }
-
- private:
-\tstd::string code_;
-\tstd::string message_;
-\t::flutter::EncodableValue details_;
-};''');
-  }
-
-  void _writeErrorOr(Indent indent, {Iterable<String> friends = const <String>[]}) {
-    final String friendLines = friends
-        .map((String className) => '\tfriend class $className;')
-        .join('\n');
-    indent.format('''
-
-template<class T> class ErrorOr {
- public:
-\tErrorOr(const T& rhs) : v_(rhs) {}
-\tErrorOr(const T&& rhs) : v_(std::move(rhs)) {}
-\tErrorOr(const FlutterError& rhs) : v_(rhs) {}
-\tErrorOr(const FlutterError&& rhs) : v_(std::move(rhs)) {}
-
-\tbool has_error() const { return std::holds_alternative<FlutterError>(v_); }
-\tconst T& value() const { return std::get<T>(v_); };
-\tconst FlutterError& error() const { return std::get<FlutterError>(v_); };
-
- private:
-$friendLines
-\tErrorOr() = default;
-\tT TakeValue() && { return std::get<T>(std::move(v_)); }
-
-\tstd::variant<T, FlutterError> v_;
-};
-''');
   }
 
   @override
@@ -2750,5 +2798,57 @@ List<Error> validateCpp(InternalCppOptions options, Root root) {
       }
     }
   }
+  return result;
+}
+
+/// Validates an AST for FFI backend generation.
+///
+/// FFI backend has the following restrictions:
+/// - Only supports `@HostApi` (Dart → Native calls)
+/// - Does not support `@FlutterApi` (Native → Dart calls)
+/// - Does not support async `@HostApi` methods
+/// - Does not support `@EventChannelApi`
+/// - Does not support `@ProxyApi`
+List<Error> validateCppFfi(CppOptions options, Root root) {
+  final result = <Error>[];
+
+  // Check for unsupported API types.
+  for (final Api api in root.apis) {
+    if (api is AstFlutterApi) {
+      result.add(
+        Error(
+          message:
+              '@FlutterApi (${api.name}) is not supported in FFI backend. FFI backend only supports @HostApi for Dart → Native calls.',
+        ),
+      );
+    }
+  }
+
+  // Check for async methods in HostApi.
+  for (final Api api in root.apis) {
+    if (api is AstHostApi) {
+      for (final Method method in api.methods) {
+        if (method.isAsynchronous) {
+          result.add(
+            Error(
+              message:
+                  'Async methods are not supported in FFI backend. Method: ${api.name}.${method.name}. FFI backend only supports synchronous methods.',
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // Check for EventChannelApi (not supported in FFI backend).
+  // Note: EventChannelApi would be represented as a special Api type or annotation.
+  // For now, we check if any API has event channel characteristics.
+  // This is a placeholder - actual implementation depends on how EventChannelApi is represented.
+
+  // Check for ProxyApi (not supported in FFI backend).
+  // Note: ProxyApi would be represented as a special Api type or annotation.
+  // For now, we check if any API has proxy characteristics.
+  // This is a placeholder - actual implementation depends on how ProxyApi is represented.
+
   return result;
 }
