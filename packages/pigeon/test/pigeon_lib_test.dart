@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:pigeon/src/ast.dart';
+import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/pigeon_lib.dart';
 import 'package:pigeon/src/pigeon_lib_internal.dart';
@@ -137,6 +138,57 @@ void main() {
     expect(opts.cppFfiHeaderOut, equals('foo_ffi.h'));
     expect(opts.cppFfiSourceOut, equals('foo_ffi.cpp'));
     expect(opts.cppFfiOptions?.apiHeaderIncludePath, equals('foo.h'));
+  });
+
+  test('parse args - dart_ffi options', () {
+    final PigeonOptions opts = Pigeon.parseArgs(<String>[
+      '--dart_ffi_binding_import',
+      'messages.g.ffi.dart',
+      '--dart_ffi_binding_class',
+      'MessagesFfiBindings',
+      '--dart_ffi_native_library',
+      'openLibrary()',
+    ]);
+    expect(opts.dartOptions?.ffiOptions?.bindingImportPath, equals('messages.g.ffi.dart'));
+    expect(opts.dartOptions?.ffiOptions?.bindingClassName, equals('MessagesFfiBindings'));
+    expect(opts.dartOptions?.ffiOptions?.nativeLibraryExpression, equals('openLibrary()'));
+  });
+
+  test('Dart FFI validation rejects async HostApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'Api',
+          methods: <Method>[
+            Method(
+              name: 'doSomething',
+              location: ApiLocation.host,
+              parameters: <Parameter>[],
+              returnType: const TypeDeclaration(baseName: 'void', isNullable: false),
+              isAsynchronous: true,
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+    const adapter = DartGeneratorAdapter();
+    final errors = adapter.validate(
+      InternalPigeonOptions.fromPigeonOptions(
+        const PigeonOptions(
+          dartOut: 'messages.g.dart',
+          dartOptions: DartOptions(
+            ffiOptions: DartFfiOptions(bindingImportPath: 'messages.g.ffi.dart'),
+          ),
+        ),
+      ),
+      root,
+    );
+    expect(
+      errors.map((Error error) => error.message),
+      contains('Dart FFI does not support async HostApi method "doSomething"'),
+    );
   });
 
   test('parse args - ast_out', () {

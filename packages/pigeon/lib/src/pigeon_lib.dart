@@ -534,6 +534,18 @@ ${_argParser.usage}''';
           'Path to generated library for Dart tests, when using '
           '@HostApi(dartHostTestHandler:).',
     )
+    ..addOption(
+      'dart_ffi_binding_import',
+      help: 'Import path for the ffigen-generated Dart FFI binding.',
+    )
+    ..addOption(
+      'dart_ffi_binding_class',
+      help: 'Class name for the ffigen-generated Dart FFI binding.',
+    )
+    ..addOption(
+      'dart_ffi_native_library',
+      help: 'Dart expression used to create the default FFI DynamicLibrary.',
+    )
     ..addOption('objc_source_out', help: 'Path to generated Objective-C source file (.m).')
     ..addOption('java_out', help: 'Path to generated Java file (.java).')
     ..addOption('java_package', help: 'The package that generated Java code will be in.')
@@ -623,11 +635,24 @@ ${_argParser.usage}''';
     // get set in the `run` function to accommodate users that are using the
     // `configurePigeon` function.
     final ArgResults results = _argParser.parse(args);
+    final dartFfiBindingImport = results['dart_ffi_binding_import'] as String?;
 
     final opts = PigeonOptions(
       input: results['input'] as String?,
       dartOut: results['dart_out'] as String?,
       dartTestOut: results['dart_test_out'] as String?,
+      dartOptions: dartFfiBindingImport == null
+          ? null
+          : DartOptions(
+              ffiOptions: DartFfiOptions(
+                bindingImportPath: dartFfiBindingImport,
+                bindingClassName: (results['dart_ffi_binding_class'] as String?) ?? 'NativeLibrary',
+                nativeLibraryExpression:
+                    (results['dart_ffi_native_library'] as String?) ??
+                    'ffi.DynamicLibrary.process()',
+              ),
+              ignoreLints: results.flag('ignore_lints'),
+            ),
       objcHeaderOut: results['objc_header_out'] as String?,
       objcSourceOut: results['objc_source_out'] as String?,
       objcOptions: ObjcOptions(prefix: results['objc_prefix'] as String?),
