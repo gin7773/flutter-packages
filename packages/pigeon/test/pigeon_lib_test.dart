@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:path/path.dart' as path;
 import 'package:pigeon/src/ast.dart';
 import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
@@ -33,6 +34,14 @@ class _ValidatorGeneratorAdapter implements GeneratorAdapter {
     didCallValidate = true;
     return <Error>[Error(message: '_ValidatorGenerator')];
   }
+}
+
+class _ProcessCall {
+  _ProcessCall(this.executable, this.arguments, this.workingDirectory);
+
+  final String executable;
+  final List<String> arguments;
+  final String? workingDirectory;
 }
 
 void main() {
@@ -1602,6 +1611,92 @@ abstract class Api {
       completer.complete();
     });
     await completer.future;
+  });
+
+  test('runWithOptions runs ffigen after generating config', () async {
+    final Directory dir = Directory.systemTemp.createTempSync();
+    try {
+      final input = File(path.join(dir.path, 'foo.dart'))..createSync();
+      final parseResults = parseSource('''
+@HostApi()
+abstract class Api {
+  int add(int x, int y);
+}
+''');
+      final calls = <_ProcessCall>[];
+
+      Future<ProcessResult> processRunner(
+        String executable,
+        List<String> arguments, {
+        String? workingDirectory,
+      }) async {
+        calls.add(_ProcessCall(executable, arguments, workingDirectory));
+        expect(File(path.join(workingDirectory!, 'ffigen.yaml')).existsSync(), isTrue);
+        return ProcessResult(123, 0, '', '');
+      }
+
+      final int result = await Pigeon.runWithOptions(
+        PigeonOptions(
+          input: input.path,
+          basePath: dir.path,
+          dartOut: 'lib/messages.g.dart',
+          dartFfiOut: 'lib/messages.g.ffi.dart',
+          dartFfiConfigOut: 'ffigen.yaml',
+          dartOptions: const DartOptions(ffiOptions: DartFfiOptions()),
+          cppHeaderOut: 'tizen/messages.h',
+          cppSourceOut: 'tizen/messages.cc',
+          cppFfiHeaderOut: 'tizen/messages_ffi.h',
+          cppFfiSourceOut: 'tizen/messages_ffi.cc',
+        ),
+        parseResults: parseResults,
+        processRunner: processRunner,
+      );
+
+      expect(result, equals(0));
+      expect(calls, hasLength(1));
+      expect(calls.single.executable, equals(Platform.resolvedExecutable));
+      expect(calls.single.arguments, equals(<String>['run', 'ffigen', '--config', 'ffigen.yaml']));
+      expect(calls.single.workingDirectory, equals(dir.path));
+    } finally {
+      dir.deleteSync(recursive: true);
+    }
+  });
+
+  test('runWithOptions returns an error when ffigen fails', () async {
+    final Directory dir = Directory.systemTemp.createTempSync();
+    try {
+      final input = File(path.join(dir.path, 'foo.dart'))..createSync();
+      final parseResults = parseSource('''
+@HostApi()
+abstract class Api {
+  int add(int x, int y);
+}
+''');
+
+      final int result = await Pigeon.runWithOptions(
+        PigeonOptions(
+          input: input.path,
+          basePath: dir.path,
+          dartOut: 'lib/messages.g.dart',
+          dartFfiOut: 'lib/messages.g.ffi.dart',
+          dartFfiConfigOut: 'ffigen.yaml',
+          dartOptions: const DartOptions(ffiOptions: DartFfiOptions()),
+          cppHeaderOut: 'tizen/messages.h',
+          cppSourceOut: 'tizen/messages.cc',
+          cppFfiHeaderOut: 'tizen/messages_ffi.h',
+          cppFfiSourceOut: 'tizen/messages_ffi.cc',
+        ),
+        parseResults: parseResults,
+        processRunner:
+            (String executable, List<String> arguments, {String? workingDirectory}) async {
+              return ProcessResult(123, 1, 'ffigen stdout', 'ffigen stderr');
+            },
+      );
+
+      expect(result, equals(1));
+    } finally {
+      dir.deleteSync(recursive: true);
+    }
   });
 
   test('unsupported non-positional parameters on FlutterApi', () {
