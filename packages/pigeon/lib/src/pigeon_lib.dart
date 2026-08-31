@@ -252,6 +252,7 @@ class PigeonOptions {
   /// Creates a instance of PigeonOptions
   const PigeonOptions({
     this.input,
+    this.configDirectory,
     this.dartOut,
     this.dartFfiOut,
     this.dartFfiConfigOut,
@@ -286,6 +287,13 @@ class PigeonOptions {
   /// Path to the file which will be processed.
   final String? input;
 
+  /// Directory where generated configuration files for native interop tooling
+  /// will be written.
+  ///
+  /// Defaults to `tool/pigeon` when generating Dart FFI bindings from a C++ FFI
+  /// header.
+  final String? configDirectory;
+
   /// Path to the Dart file that will be generated.
   final String? dartOut;
 
@@ -294,6 +302,8 @@ class PigeonOptions {
 
   /// Path to the ffigen config file that will be generated and used to run
   /// ffigen.
+  ///
+  /// Overrides the path inferred from [configDirectory].
   final String? dartFfiConfigOut;
 
   /// Path to the Dart file that will be generated for test support classes.
@@ -380,6 +390,7 @@ class PigeonOptions {
   static PigeonOptions fromMap(Map<String, Object> map) {
     return PigeonOptions(
       input: map['input'] as String?,
+      configDirectory: map['configDirectory'] as String?,
       dartOut: map['dartOut'] as String?,
       dartFfiOut: map['dartFfiOut'] as String?,
       dartFfiConfigOut: map['dartFfiConfigOut'] as String?,
@@ -432,6 +443,7 @@ class PigeonOptions {
   Map<String, Object> toMap() {
     final result = <String, Object>{
       if (input != null) 'input': input!,
+      if (configDirectory != null) 'configDirectory': configDirectory!,
       if (dartOut != null) 'dartOut': dartOut!,
       if (dartFfiOut != null) 'dartFfiOut': dartFfiOut!,
       if (dartFfiConfigOut != null) 'dartFfiConfigOut': dartFfiConfigOut!,
@@ -544,6 +556,10 @@ ${_argParser.usage}''';
   static final ArgParser _argParser = ArgParser()
     ..addOption('input', help: 'REQUIRED: Path to pigeon file.')
     ..addOption(
+      'config_dir',
+      help: 'Directory where generated config files for native interop tooling will be written.',
+    )
+    ..addOption(
       'dart_out',
       help:
           'Path to generated Dart source file (.dart). '
@@ -554,7 +570,7 @@ ${_argParser.usage}''';
       'dart_ffi_config_out',
       help:
           'Path to generated ffigen config file (.yaml). '
-          'If set, Pigeon runs ffigen.',
+          'Overrides config_dir inference.',
     )
     ..addOption(
       'dart_test_out',
@@ -675,6 +691,7 @@ ${_argParser.usage}''';
 
     final opts = PigeonOptions(
       input: results['input'] as String?,
+      configDirectory: results['config_dir'] as String?,
       dartOut: results['dart_out'] as String?,
       dartFfiOut: dartFfiOut,
       dartFfiConfigOut: results['dart_ffi_config_out'] as String?,

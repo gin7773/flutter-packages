@@ -47,6 +47,48 @@ String _getDartFfiBindingImportPath(PigeonOptions options) {
   return context.relative(normalizedDartFfiOut, from: context.dirname(normalizedDartOut));
 }
 
+const String _defaultConfigDirectory = 'tool/pigeon';
+
+String _getFfiGenConfigFileName(String? inputPath) {
+  if (inputPath == null || inputPath.isEmpty) {
+    return 'ffigen_config.yaml';
+  }
+  final normalizedInputPath = _normalizeDartPath(inputPath);
+  final baseName = path.posix.basenameWithoutExtension(normalizedInputPath);
+  return '${baseName}_ffigen_config.yaml';
+}
+
+String? _getFfiGenConfigOut(PigeonOptions options) {
+  if (options.dartFfiConfigOut != null) {
+    return options.dartFfiConfigOut;
+  }
+  if (options.dartFfiOut == null || options.cppFfiHeaderOut == null) {
+    return null;
+  }
+  final configDirectory = (options.configDirectory == null || options.configDirectory!.isEmpty)
+      ? _defaultConfigDirectory
+      : _normalizeDartPath(options.configDirectory!);
+  return path.posix.join(configDirectory, _getFfiGenConfigFileName(options.input));
+}
+
+InternalFfiGenConfigOptions? _getFfiGenConfigOptions(
+  PigeonOptions options,
+  Iterable<String>? copyrightHeader,
+) {
+  final configOut = _getFfiGenConfigOut(options);
+  if (configOut == null) {
+    return null;
+  }
+  return InternalFfiGenConfigOptions(
+    configOut: configOut,
+    dartOut: options.dartFfiOut ?? '',
+    ffiHeaderPath: options.cppFfiHeaderOut ?? '',
+    bindingClassName: options.dartOptions?.ffiOptions?.bindingClassName ?? 'NativeLibrary',
+    description: 'Generated bindings for Pigeon C++ FFI APIs.',
+    copyrightHeader: copyrightHeader,
+  );
+}
+
 String _normalizeDartPath(String path) => path.replaceAll(r'\', '/');
 
 /// Options used when running the code generator.
@@ -54,6 +96,7 @@ class InternalPigeonOptions {
   /// Creates a instance of InternalPigeonOptions
   const InternalPigeonOptions({
     required this.input,
+    this.configDirectory,
     required this.objcOptions,
     required this.javaOptions,
     required this.swiftOptions,
@@ -74,6 +117,7 @@ class InternalPigeonOptions {
     PigeonOptions options,
     Iterable<String>? copyrightHeader,
   ) : input = options.input,
+      configDirectory = options.configDirectory,
       objcOptions = (options.objcHeaderOut == null || options.objcSourceOut == null)
           ? null
           : InternalObjcOptions.fromObjcOptions(
@@ -141,17 +185,7 @@ class InternalPigeonOptions {
               fallbackFfiBindingImportPath: _getDartFfiBindingImportPath(options),
               copyrightHeader: copyrightHeader,
             ),
-      ffigenConfigOptions = options.dartFfiConfigOut == null
-          ? null
-          : InternalFfiGenConfigOptions(
-              configOut: options.dartFfiConfigOut!,
-              dartOut: options.dartFfiOut ?? '',
-              ffiHeaderPath: options.cppFfiHeaderOut ?? '',
-              bindingClassName:
-                  options.dartOptions?.ffiOptions?.bindingClassName ?? 'NativeLibrary',
-              description: 'Generated bindings for Pigeon C++ FFI APIs.',
-              copyrightHeader: copyrightHeader,
-            ),
+      ffigenConfigOptions = _getFfiGenConfigOptions(options, copyrightHeader),
       copyrightHeader = options.copyrightHeader != null
           ? _lineReader(path.posix.join(options.basePath ?? '', options.copyrightHeader))
           : null,
@@ -171,6 +205,10 @@ class InternalPigeonOptions {
 
   /// Path to the file which will be processed.
   final String? input;
+
+  /// Directory where generated configuration files for native interop tooling
+  /// will be written.
+  final String? configDirectory;
 
   /// Options that control how Dart will be generated.
   final InternalDartOptions? dartOptions;
