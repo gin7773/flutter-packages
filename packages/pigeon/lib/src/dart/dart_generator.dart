@@ -271,8 +271,8 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
       indent.writeln("import 'dart:ffi' as ffi;");
     }
     indent.writeln("import 'dart:async';");
-    if (root.containsProxyApi) {
-      indent.writeln("import 'dart:io' show Platform;");
+    if (usesFfi || root.containsProxyApi) {
+      indent.writeln("import 'dart:io' show File, Platform;");
     }
     final String typedDataTypes = usesFfi
         ? 'ByteData, Float64List, Int32List, Int64List, Uint8List'
