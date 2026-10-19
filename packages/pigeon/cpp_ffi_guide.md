@@ -1,0 +1,332 @@
+# C++ FFI Guide
+
+This guide describes the experimental C++ FFI generation path for Pigeon.
+
+For Swift FFI and Kotlin JNI, see the [Native Interop guide](native_interop_guide.md).
+These backends use different binding and data conversion mechanisms. Generate
+C++ Dart FFI and Swift FFI/Kotlin JNI from separate Pigeon files with separate
+Dart output paths; combining them in one configuration is rejected.
+
+## C++ FFI
+
+C++ FFI lets Dart call generated C ABI functions directly through `dart:ffi`
+instead of sending calls through `BasicMessageChannel`. The public Dart API is
+still the normal Pigeon HostApi class generated in `messages.g.dart`; callers do
+not need to call native pointers directly.
+
+The generated call path is:
+
+```text
+Dart HostApi caller
+  -> messages.g.dart
+  -> messages.g.ffi.dart
+  -> messages_ffi.cc
+  -> optional PigeonFfiSyncDispatcher
+  -> hand-written C++ HostApi implementation
+```
+
+Asynchronous HostApi methods use the same generated C ABI layer, but native
+code replies later through a generated callback:
+
+```text
+Dart HostApi caller
+  -> messages.g.dart Future<T>
+  -> messages.g.ffi.dart
+  -> messages_ffi.cc
+  -> optional PigeonFfiSyncDispatcher
+  -> hand-written C++ HostApi implementation
+  -> generated reply callback
+  -> Dart Completer<T>
+```
+
+FFI event streams use the same generated binding for `listen` and `cancel`,
+then send native events back through generated callbacks:
+
+```text
+Dart Stream listener
+  -> messages.g.dart
+  -> messages.g.ffi.dart
+  -> messages_ffi.cc listen/cancel
+  -> optional PigeonFfiSyncDispatcher
+  -> hand-written C++ StreamHandler
+
+hand-written C++ StreamHandler
+  -> generated C++ EventSink
+  -> Dart NativeCallable callback
+  -> Dart StreamController
+```
+
+## Requirements
+
+Add `ffi` as a dependency and `ffigen` as a dev dependency in the package that
+runs Pigeon:
+
+```sh
+dart pub add ffi
+dart pub add dev:ffigen
+```
+
+The package should then have entries similar to:
+
+```yaml
+dependencies:
+  ffi: ...
+
+dev_dependencies:
+  ffigen: ...
+```
+
+The generated C++ sources must also be compiled into the native library that
+Dart opens with FFI.
+
+## Pigeon Configuration
+
+Configure both the regular C++ generator and the C++ FFI generator. The regular
+C++ files provide the typed HostApi interface and codec helpers; the FFI files
+provide exported C ABI functions that ffigen can read.
+`cppFfiHeaderOut` and `cppFfiSourceOut` must be configured together.
+
+```dart
+import 'package:pigeon/pigeon.dart';
+
+@ConfigurePigeon(
+  PigeonOptions(
+    dartOut: 'lib/src/messages.g.dart',
+    dartFfiOut: 'lib/src/messages.g.ffi.dart',
+    configDirectory: 'tool/pigeon',
+    dartOptions: DartOptions(
+      ffiOptions: DartFfiOptions(
+        bindingClassName: 'MessagesFfiBindings',
+        nativeLibraryExpression: 'ffi.DynamicLibrary.process()',
+      ),
+    ),
+    cppHeaderOut: 'tizen/messages.h',
+    cppSourceOut: 'tizen/messages.cc',
+    cppOptions: CppOptions(namespace: 'my_plugin'),
+    cppFfiHeaderOut: 'tizen/messages_ffi.h',
+    cppFfiSourceOut: 'tizen/messages_ffi.cc',
+    dartPackageName: 'my_plugin',
+  ),
+)
+@HostApi()
+abstract class VideoPlayerApi {
+  int create(String uri);
+
+  @async
+  int initialize(int playerId);
+
+  void dispose(int playerId);
+}
+
+@EventChannelApi()
+abstract class VideoPlayerEvents {
+  Map<Object?, Object?> events();
+}
+```
+
+If the generated FFI header cannot include the generated C++ API header by file
+name alone, set `cppFfiOptions.apiHeaderIncludePath` explicitly:
+
+```dart
+cppFfiOptions: CppFfiOptions(
+  apiHeaderIncludePath: 'path/visible/to/messages.h',
+),
+```
+
+The C++ FFI adapter uses `cppOptions.namespace` by default so that
+`SetUpMyApiFfi` and the generated C++ API classes live in the same namespace.
+Set `cppFfiOptions.namespace` only if the FFI adapter must use a different
+namespace from the regular generated C++ API.
+
+If the target C++ toolchain cannot compile `std::visit` with
+`flutter::EncodableValue`, disable it for the regular C++ generator:
+
+```dart
+cppOptions: CppOptions(
+  namespace: 'my_plugin',
+  useStdVisit: false,
+),
+```
+
+Run Pigeon from the package root:
+
+```sh
+dart run pigeon --input pigeons/messages.dart
+```
+
+When `dartFfiOut`, `cppFfiHeaderOut`, and `cppFfiSourceOut` are set, Pigeon
+will generate the ffigen config file and then run ffigen automatically. By
+default, the config file is written under `tool/pigeon`. You can change that
+directory with `configDirectory` or `--config_dir`.
+For example, `pigeons/messages.dart` produces
+`tool/pigeon/messages_ffigen_config.yaml`.
+Paths inside that config are written relative to the config file, so the Dart
+FFI output may appear as `../../lib/src/messages.g.ffi.dart`.
+Running from the package root lets `dart run ffigen` resolve the package's
+`pubspec.yaml` and dev dependencies.
+
+Set `dartFfiConfigOut` or `--dart_ffi_config_out` only when you need to override
+the exact ffigen config file path.
+
+The same paths can also be passed on the command line:
+
+```sh
+dart run pigeon \
+  --input pigeons/messages.dart \
+  --dart_out lib/src/messages.g.dart \
+  --dart_ffi_out lib/src/messages.g.ffi.dart \
+  --config_dir tool/pigeon \
+  --dart_ffi_binding_class MessagesFfiBindings \
+  --dart_ffi_native_library 'ffi.DynamicLibrary.process()' \
+  --cpp_header_out tizen/messages.h \
+  --cpp_source_out tizen/messages.cc \
+  --cpp_namespace my_plugin \
+  --cpp_ffi_header_out tizen/messages_ffi.h \
+  --cpp_ffi_source_out tizen/messages_ffi.cc
+```
+
+## Generated Files
+
+With the configuration above, Pigeon generates:
+
+* `lib/src/messages.g.dart`: the high-level Dart HostApi wrapper and FFI event
+  stream facade.
+* `lib/src/messages.g.ffi.dart`: the low-level Dart FFI binding generated by
+  ffigen.
+* `tizen/messages.h` and `tizen/messages.cc`: the regular generated C++ API and
+  codec support.
+* `tizen/messages_ffi.h` and `tizen/messages_ffi.cc`: the generated C ABI
+  adapter used by FFI.
+* `tool/pigeon/messages_ffigen_config.yaml`: the ffigen configuration that
+  Pigeon uses for the automatic ffigen step.
+
+## Native Setup
+
+Implement the generated C++ HostApi class as usual, then register that
+implementation with the generated FFI setup function:
+
+```cpp
+#include "messages.h"
+#include "messages_ffi.h"
+
+namespace my_plugin {
+
+class VideoPlayerApiImpl : public VideoPlayerApi {
+ public:
+  ErrorOr<int64_t> Create(const std::string& uri) override {
+    return 1;
+  }
+
+  void Initialize(
+      int64_t player_id,
+      std::function<void(ErrorOr<int64_t> reply)> result) override {
+    result(0);
+  }
+
+  std::optional<FlutterError> Dispose(int64_t player_id) override {
+    return std::nullopt;
+  }
+};
+
+void RegisterVideoPlayerApiFfi(VideoPlayerApiImpl* api) {
+  SetUpVideoPlayerApiFfi(api);
+}
+
+}  // namespace my_plugin
+```
+
+If a HostApi method touches platform-thread-only APIs, such as a
+`BinaryMessenger`, event channel, texture registrar, or platform media APIs,
+pass a dispatcher when setting up the FFI API:
+
+```cpp
+#include <map>
+
+namespace my_plugin {
+
+class PlatformThreadDispatcher : public PigeonFfiSyncDispatcher {
+ public:
+  ::PigeonFfiBuffer* RunSync(
+      std::function<::PigeonFfiBuffer*()> task) override {
+    // If already on the platform thread, run task immediately. Otherwise post
+    // it to the platform thread and block until it returns.
+    return task();
+  }
+};
+
+void RegisterVideoPlayerApiFfi(
+    VideoPlayerApiImpl* api,
+    PlatformThreadDispatcher* dispatcher) {
+  SetUpVideoPlayerApiFfi(api, dispatcher);
+}
+
+}  // namespace my_plugin
+```
+
+`RunSync` must complete synchronously before returning to Dart. Implementations
+should avoid deadlocks by running the task inline when already on the platform
+thread. The `api` and `dispatcher` pointers passed to `SetUpVideoPlayerApiFfi`
+must remain valid for as long as Dart can make FFI calls.
+
+For an async HostApi method, the generated FFI adapter decodes the request and
+starts the native call synchronously. The hand-written C++ implementation must
+call the generated `result` callback exactly once when the operation completes.
+It may call the callback before returning or later from another thread, but it
+must not keep references to generated argument objects beyond their valid
+lifetime unless it copies the data it needs.
+
+Make sure both `messages.cc` and `messages_ffi.cc` are included in the native
+build.
+
+## FFI Event Streams
+
+When Dart FFI is enabled, `@EventChannelApi` methods generate FFI-backed Dart
+`Stream`s instead of Flutter `EventChannel`s. The generated C++ FFI header
+contains one stream handler and one event sink type for each event method.
+
+```cpp
+namespace my_plugin {
+
+class VideoPlayerEventsEventsHandler
+    : public PigeonVideoPlayerEventsEventsStreamHandler {
+ public:
+  std::optional<FlutterError> OnListen(
+      const std::string& instance_name,
+      std::unique_ptr<PigeonVideoPlayerEventsEventsEventSink> sink) override {
+    sinks_[instance_name] = std::move(sink);
+    return std::nullopt;
+  }
+
+  std::optional<FlutterError> OnCancel(
+      const std::string& instance_name) override {
+    sinks_.erase(instance_name);
+    return std::nullopt;
+  }
+
+ private:
+  std::map<std::string,
+           std::unique_ptr<PigeonVideoPlayerEventsEventsEventSink>>
+      sinks_;
+};
+
+void RegisterVideoPlayerEventsFfi(
+    VideoPlayerEventsEventsHandler* handler,
+    PlatformThreadDispatcher* dispatcher) {
+  SetUpVideoPlayerEventsEventsFfi(handler, dispatcher);
+}
+
+}  // namespace my_plugin
+```
+
+Native code sends events by calling `sink->Success(event)`, reports stream
+errors with `sink->Error(error)`, and closes the Dart stream with
+`sink->EndOfStream()`. The `instanceName` argument in Dart is encoded and
+passed to C++ as `instance_name`, so plugins can keep one sink per player.
+The stream handler and dispatcher pointers passed to `SetUp...Ffi` must remain
+valid for as long as Dart can listen to the FFI stream.
+
+## Limitations
+
+The C++ FFI generator currently supports synchronous HostApi methods,
+asynchronous HostApi methods, and FFI event streams. FlutterApi and ProxyApi are
+not supported by this C++ FFI path.
