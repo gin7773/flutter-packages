@@ -1,3 +1,7 @@
+## 29.1.1
+
+* [cpp] Fixes C++ FFI options merging to use the renamed upstream map helper.
+
 ## 29.1.0
 
 * [cpp] Adds experimental C ABI FFI adapters for synchronous and asynchronous

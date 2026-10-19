@@ -11,6 +11,22 @@ import 'package:test/test.dart';
 const String _packageName = 'test_package';
 
 void main() {
+  test('C++ FFI options merge overrides only supplied values', () {
+    const original = CppFfiOptions(
+      headerIncludePath: 'messages_ffi.h',
+      apiHeaderIncludePath: 'messages.h',
+      namespace: 'original',
+      copyrightHeader: <String>['Original copyright'],
+    );
+    final CppFfiOptions merged = original.merge(const CppFfiOptions(namespace: 'updated'));
+
+    expect(merged.namespace, 'updated');
+    expect(merged.headerIncludePath, 'messages_ffi.h');
+    expect(merged.apiHeaderIncludePath, 'messages.h');
+    expect(merged.copyrightHeader, <String>['Original copyright']);
+    expect(original.namespace, 'original');
+  });
+
   test('generates C ABI header for sync HostApi', () {
     final root = Root(
       apis: <Api>[
