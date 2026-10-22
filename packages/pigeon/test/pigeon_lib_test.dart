@@ -224,20 +224,20 @@ void main() {
 
   test('PigeonOptions converts configDirectory to and from map', () {
     const options = PigeonOptions(configDirectory: 'tool/pigeon');
-    final convertedOptions = PigeonOptions.fromMap(options.toMap());
+    final PigeonOptions convertedOptions = PigeonOptions.fromMap(options.toMap());
 
     expect(convertedOptions.configDirectory, equals('tool/pigeon'));
   });
 
   test('PigeonOptions converts CppOptions.useStdVisit to and from map', () {
     const options = PigeonOptions(cppOptions: CppOptions(useStdVisit: false));
-    final convertedOptions = PigeonOptions.fromMap(options.toMap());
+    final PigeonOptions convertedOptions = PigeonOptions.fromMap(options.toMap());
 
     expect(convertedOptions.cppOptions?.useStdVisit, isFalse);
   });
 
   test('Dart FFI import path is inferred from dart_ffi_out', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         dartOut: 'lib/src/messages.g.dart',
         dartFfiOut: 'lib/src/messages.g.ffi.dart',
@@ -249,7 +249,7 @@ void main() {
   });
 
   test('C++ FFI namespace is inferred from C++ namespace', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         cppHeaderOut: 'tizen/messages.h',
         cppSourceOut: 'tizen/messages.cc',
@@ -263,7 +263,7 @@ void main() {
   });
 
   test('C++ FFI namespace overrides inferred C++ namespace', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         cppHeaderOut: 'tizen/messages.h',
         cppSourceOut: 'tizen/messages.cc',
@@ -278,7 +278,7 @@ void main() {
   });
 
   test('ffigen config path is inferred from input path', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         input: 'pigeons/messages.dart',
         dartOut: 'lib/src/messages.g.dart',
@@ -295,7 +295,7 @@ void main() {
   });
 
   test('ffigen config path can use config_dir', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         input: 'pigeons/messages.dart',
         configDirectory: 'tool/native_interop',
@@ -313,7 +313,7 @@ void main() {
   });
 
   test('explicit ffigen config path overrides inferred path', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         input: 'pigeons/messages.dart',
         configDirectory: 'tool/pigeon',
@@ -328,10 +328,10 @@ void main() {
     expect(options.ffigenConfigOptions?.configOut, equals('ffigen.yaml'));
   });
 
-  for (final bool useSwiftFfi in <bool>[true, false]) {
-    final String backend = useSwiftFfi ? 'Swift FFI' : 'Kotlin JNI';
+  for (final useSwiftFfi in <bool>[true, false]) {
+    final backend = useSwiftFfi ? 'Swift FFI' : 'Kotlin JNI';
     test('validatePigeonOptions rejects C++ Dart FFI with $backend', () {
-      final errors = validatePigeonOptions(
+      final List<Error> errors = validatePigeonOptions(
         PigeonOptions(
           dartOut: 'lib/messages.dart',
           dartOptions: const DartOptions(
@@ -348,7 +348,7 @@ void main() {
   }
 
   test('validatePigeonOptions rejects shared FFI output without C++ wrapper options', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(
         dartOut: 'lib/messages.dart',
         dartFfiOut: 'lib/messages.ffi.dart',
@@ -376,13 +376,13 @@ void main() {
   });
 
   test('Dart C++ FFI validation still requires a binding import', () {
-    final options = InternalPigeonOptions.fromPigeonOptions(
+    final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
         dartOut: 'lib/messages.dart',
         dartOptions: DartOptions(ffiOptions: DartFfiOptions()),
       ),
     );
-    final errors = const DartGeneratorAdapter().validate(options, Root.makeEmpty());
+    final List<Error> errors = const DartGeneratorAdapter().validate(options, Root.makeEmpty());
 
     expect(errors, hasLength(1));
     expect(errors.single.message, contains('Dart FFI requires dartFfiOut'));
@@ -424,7 +424,7 @@ void main() {
   });
 
   test('validatePigeonOptions rejects Dart FFI without Dart output', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(
         dartOptions: DartOptions(
           ffiOptions: DartFfiOptions(bindingImportPath: 'messages.g.ffi.dart'),
@@ -442,7 +442,7 @@ void main() {
   });
 
   test('validatePigeonOptions rejects Dart FFI output without C++ FFI header', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(
         dartOut: 'lib/src/messages.g.dart',
         dartFfiOut: 'lib/src/messages.g.ffi.dart',
@@ -460,7 +460,7 @@ void main() {
   });
 
   test('validatePigeonOptions rejects ffigen config without Dart FFI output', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(
         dartFfiConfigOut: 'tool/pigeon/messages_ffigen_config.yaml',
         cppFfiHeaderOut: 'tizen/messages_ffi.h',
@@ -478,7 +478,7 @@ void main() {
   });
 
   test('validatePigeonOptions rejects ffigen config without C++ FFI header', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(
         dartFfiOut: 'lib/src/messages.g.ffi.dart',
         dartFfiConfigOut: 'tool/pigeon/messages_ffigen_config.yaml',
@@ -495,7 +495,7 @@ void main() {
   });
 
   test('validatePigeonOptions rejects incomplete C++ FFI outputs', () {
-    final errors = validatePigeonOptions(
+    final List<Error> errors = validatePigeonOptions(
       const PigeonOptions(cppFfiHeaderOut: 'tizen/messages_ffi.h'),
     );
 
@@ -529,7 +529,7 @@ void main() {
     );
     const adapter = CppGeneratorAdapter();
 
-    final errorsWithoutFfi = adapter.validate(
+    final List<Error> errorsWithoutFfi = adapter.validate(
       InternalPigeonOptions.fromPigeonOptions(
         const PigeonOptions(
           cppHeaderOut: 'messages.h',
@@ -544,7 +544,7 @@ void main() {
       contains('C++ does not support event channels'),
     );
 
-    final errorsWithFfi = adapter.validate(
+    final List<Error> errorsWithFfi = adapter.validate(
       InternalPigeonOptions.fromPigeonOptions(
         const PigeonOptions(
           cppHeaderOut: 'messages.h',
@@ -579,7 +579,7 @@ void main() {
       enums: <Enum>[],
     );
     const adapter = DartGeneratorAdapter();
-    final errors = adapter.validate(
+    final List<Error> errors = adapter.validate(
       InternalPigeonOptions.fromPigeonOptions(
         const PigeonOptions(
           dartOut: 'messages.g.dart',
@@ -2201,7 +2201,7 @@ abstract class Api {
     final Directory dir = Directory.systemTemp.createTempSync();
     try {
       final input = File(path.join(dir.path, 'foo.dart'))..createSync();
-      final parseResults = parseSource('''
+      final ParseResults parseResults = parseSource('''
 @HostApi()
 abstract class Api {
   int add(int x, int y);
@@ -2229,7 +2229,7 @@ abstract class Api {
     final Directory dir = Directory.systemTemp.createTempSync();
     try {
       final input = File(path.join(dir.path, 'foo.dart'))..createSync();
-      final parseResults = parseSource('''
+      final ParseResults parseResults = parseSource('''
 @HostApi()
 abstract class Api {
   int add(int x, int y);
@@ -2291,7 +2291,7 @@ abstract class EventApi {
     final Directory dir = Directory.systemTemp.createTempSync();
     try {
       final input = File(path.join(dir.path, 'foo.dart'))..createSync();
-      final parseResults = parseSource('''
+      final ParseResults parseResults = parseSource('''
 @HostApi()
 abstract class Api {
   int add(int x, int y);
@@ -2314,10 +2314,10 @@ abstract class EventApi {
       }) async {
         calls.add(_ProcessCall(executable, arguments, workingDirectory));
         final configFile = File(path.join(workingDirectory!, arguments.last));
-        final outputLine = configFile.readAsLinesSync().singleWhere(
+        final String outputLine = configFile.readAsLinesSync().singleWhere(
           (String line) => line.startsWith('output: '),
         );
-        final outputPath = outputLine.substring("output: '".length, outputLine.length - 1);
+        final String outputPath = outputLine.substring("output: '".length, outputLine.length - 1);
         File(path.normalize(path.join(path.dirname(configFile.path), outputPath)))
           ..createSync(recursive: true)
           ..writeAsStringSync('// Generated by fake ffigen for this test.');
@@ -2370,13 +2370,13 @@ abstract class EventApi {
       expect(cppFfiSourceFile.existsSync(), isTrue);
       expect(ffigenConfigFile.existsSync(), isTrue);
 
-      final dartCode = dartFile.readAsStringSync();
-      final dartFfiCode = dartFfiFile.readAsStringSync();
-      final cppHeaderCode = cppHeaderFile.readAsStringSync();
-      final cppSourceCode = cppSourceFile.readAsStringSync();
-      final cppFfiHeaderCode = cppFfiHeaderFile.readAsStringSync();
-      final cppFfiSourceCode = cppFfiSourceFile.readAsStringSync();
-      final ffigenConfigCode = ffigenConfigFile.readAsStringSync();
+      final String dartCode = dartFile.readAsStringSync();
+      final String dartFfiCode = dartFfiFile.readAsStringSync();
+      final String cppHeaderCode = cppHeaderFile.readAsStringSync();
+      final String cppSourceCode = cppSourceFile.readAsStringSync();
+      final String cppFfiHeaderCode = cppFfiHeaderFile.readAsStringSync();
+      final String cppFfiSourceCode = cppFfiSourceFile.readAsStringSync();
+      final String ffigenConfigCode = ffigenConfigFile.readAsStringSync();
 
       expect(dartCode, contains('MessagesFfiBindings'));
       expect(dartCode, contains('Future<int> initialize'));
@@ -2423,7 +2423,7 @@ abstract class EventApi {
     final Directory dir = Directory.systemTemp.createTempSync();
     try {
       final input = File(path.join(dir.path, 'foo.dart'))..createSync();
-      final parseResults = parseSource('''
+      final ParseResults parseResults = parseSource('''
 @HostApi()
 abstract class Api {
   int add(int x, int y);
@@ -3450,16 +3450,12 @@ abstract class Api {
     });
 
     test('Swift FFI requires includeErrorClass', () {
-      final List<Error> errors = validate(
-        const SwiftGeneratorAdapter(),
-        '''
+      final List<Error> errors = validate(const SwiftGeneratorAdapter(), '''
 @HostApi()
 abstract class Api {
   void doIt();
 }
-''',
-        swiftOptions: const SwiftOptions(useFfi: true, includeErrorClass: false),
-      );
+''', swiftOptions: const SwiftOptions(useFfi: true, includeErrorClass: false));
       expect(errors, hasLength(1));
       expect(errors[0].message, contains('Swift FFI requires `includeErrorClass: true`'));
     });

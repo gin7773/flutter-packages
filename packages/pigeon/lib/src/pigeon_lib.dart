@@ -22,6 +22,7 @@ import 'ast.dart';
 import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
+import 'ffi/ffigen_config_generator.dart';
 import 'generator_tools.dart' as generator_tools;
 import 'generator_tools.dart';
 import 'gobject/gobject_generator.dart';
@@ -783,7 +784,7 @@ ${_argParser.usage}''';
     final dartFfiOut = results['dart_ffi_out'] as String?;
     final dartFfiBindingClass = results['dart_ffi_binding_class'] as String?;
     final dartFfiNativeLibrary = results['dart_ffi_native_library'] as String?;
-    final hasDartFfiOptions =
+    final bool hasDartFfiOptions =
         dartFfiBindingImport != null ||
         dartFfiOut != null ||
         dartFfiBindingClass != null ||
@@ -913,7 +914,7 @@ ${_argParser.usage}''';
     InternalPigeonOptions options,
     PigeonProcessRunner processRunner,
   ) async {
-    final ffigenOptions = options.ffigenConfigOptions;
+    final InternalFfiGenConfigOptions? ffigenOptions = options.ffigenConfigOptions;
     if (ffigenOptions == null) {
       return null;
     }

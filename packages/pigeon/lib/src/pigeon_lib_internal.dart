@@ -33,20 +33,20 @@ import 'swift/ffigen_config_generator.dart';
 import 'swift/swift_generator.dart';
 
 String _getDartFfiBindingImportPath(PigeonOptions options) {
-  final explicitImportPath = options.dartOptions?.ffiOptions?.bindingImportPath;
+  final String? explicitImportPath = options.dartOptions?.ffiOptions?.bindingImportPath;
   if (explicitImportPath != null) {
     return explicitImportPath;
   }
 
-  final dartOut = options.dartOut ?? options.dartOptions?.sourceOutPath;
-  final dartFfiOut = options.dartFfiOut;
+  final String? dartOut = options.dartOut ?? options.dartOptions?.sourceOutPath;
+  final String? dartFfiOut = options.dartFfiOut;
   if (dartOut == null || dartFfiOut == null) {
     return '';
   }
 
   final context = path.Context(style: path.Style.posix);
-  final normalizedDartOut = _normalizeDartPath(dartOut);
-  final normalizedDartFfiOut = _normalizeDartPath(dartFfiOut);
+  final String normalizedDartOut = _normalizeDartPath(dartOut);
+  final String normalizedDartFfiOut = _normalizeDartPath(dartFfiOut);
   return context.relative(normalizedDartFfiOut, from: context.dirname(normalizedDartOut));
 }
 
@@ -56,8 +56,8 @@ String _getFfiGenConfigFileName(String? inputPath) {
   if (inputPath == null || inputPath.isEmpty) {
     return 'ffigen_config.yaml';
   }
-  final normalizedInputPath = _normalizeDartPath(inputPath);
-  final baseName = path.posix.basenameWithoutExtension(normalizedInputPath);
+  final String normalizedInputPath = _normalizeDartPath(inputPath);
+  final String baseName = path.posix.basenameWithoutExtension(normalizedInputPath);
   return '${baseName}_ffigen_config.yaml';
 }
 
@@ -68,7 +68,8 @@ String? _getFfiGenConfigOut(PigeonOptions options) {
   if (options.dartFfiOut == null || options.cppFfiHeaderOut == null) {
     return null;
   }
-  final configDirectory = (options.configDirectory == null || options.configDirectory!.isEmpty)
+  final String configDirectory =
+      (options.configDirectory == null || options.configDirectory!.isEmpty)
       ? _defaultConfigDirectory
       : _normalizeDartPath(options.configDirectory!);
   return path.posix.join(configDirectory, _getFfiGenConfigFileName(options.input));
@@ -78,7 +79,7 @@ InternalFfiGenConfigOptions? _getFfiGenConfigOptions(
   PigeonOptions options,
   Iterable<String>? copyrightHeader,
 ) {
-  final configOut = _getFfiGenConfigOut(options);
+  final String? configOut = _getFfiGenConfigOut(options);
   if (configOut == null) {
     return null;
   }
@@ -95,8 +96,8 @@ InternalFfiGenConfigOptions? _getFfiGenConfigOptions(
 /// Validates option combinations that span multiple generators.
 List<Error> validatePigeonOptions(PigeonOptions options) {
   final errors = <Error>[];
-  final dartOutputPath = options.dartOut ?? options.dartOptions?.sourceOutPath;
-  final dartFfiOptions = options.dartOptions?.ffiOptions;
+  final String? dartOutputPath = options.dartOut ?? options.dartOptions?.sourceOutPath;
+  final DartFfiOptions? dartFfiOptions = options.dartOptions?.ffiOptions;
   final bool hasCppDartFfi =
       dartFfiOptions != null || options.dartFfiOut != null || options.dartFfiConfigOut != null;
   if (hasCppDartFfi &&

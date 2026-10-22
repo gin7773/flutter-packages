@@ -256,14 +256,14 @@ class PigeonFfiSyncDispatcher {
 };
 
 ''');
-    for (final AstHostApi api in hostApis) {
+    for (final api in hostApis) {
       indent.writeln('void SetUp${api.name}Ffi(');
       indent.nest(1, () {
         indent.writeln('${api.name}* api,');
         indent.writeln('PigeonFfiSyncDispatcher* dispatcher = nullptr);');
       });
     }
-    for (final AstEventChannelApi api in eventChannelApis) {
+    for (final api in eventChannelApis) {
       for (final Method method in api.methods) {
         _writeEventChannelSetUpDeclaration(indent, api, method);
       }
@@ -884,7 +884,7 @@ void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
       );
     });
     indent.writeScoped('try {', '}', () {
-      final List<String> methodArguments = <String>[];
+      final methodArguments = <String>[];
       if (method.parameters.isNotEmpty) {
         indent.writeScoped('if (request == nullptr || request->data == nullptr) {', '}', () {
           indent.writeln(
@@ -916,7 +916,7 @@ void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
             _baseCppTypeForBuiltinDartType,
           );
           final String argName = _safeArgumentName(index, parameter);
-          final String encodableArgName = 'encodable_$argName';
+          final encodableArgName = 'encodable_$argName';
           indent.writeln('const auto& $encodableArgName = args->at($index);');
           if (!parameter.type.isNullable) {
             indent.writeScoped('if ($encodableArgName.IsNull()) {', '}', () {
@@ -940,8 +940,7 @@ void _writeMethodSource(Indent indent, AstHostApi api, Method method) {
         _baseCppTypeForBuiltinDartType,
       );
       final String returnTypeName = _hostApiReturnType(returnType);
-      final String call =
-          '${_apiVariable(api)}->${_methodName(method)}(${methodArguments.join(', ')})';
+      final call = '${_apiVariable(api)}->${_methodName(method)}(${methodArguments.join(', ')})';
       indent.writeln('$returnTypeName output = $call;');
       _writeReturnEncoding(indent, method.returnType, returnType, api.name);
     }, addTrailingNewline: false);
@@ -972,7 +971,7 @@ void _writeAsyncMethodSource(Indent indent, AstHostApi api, Method method) {
       indent.writeln('return;');
     });
     indent.writeScoped('try {', '}', () {
-      final List<String> methodArguments = <String>[];
+      final methodArguments = <String>[];
       if (method.parameters.isNotEmpty) {
         indent.writeScoped('if (request == nullptr || request->data == nullptr) {', '}', () {
           indent.writeln(
@@ -1007,7 +1006,7 @@ void _writeAsyncMethodSource(Indent indent, AstHostApi api, Method method) {
             _baseCppTypeForBuiltinDartType,
           );
           final String argName = _safeArgumentName(index, parameter);
-          final String encodableArgName = 'encodable_$argName';
+          final encodableArgName = 'encodable_$argName';
           indent.writeln('const auto& $encodableArgName = args->at($index);');
           if (!parameter.type.isNullable) {
             indent.writeScoped('if ($encodableArgName.IsNull()) {', '}', () {
@@ -1034,7 +1033,7 @@ void _writeAsyncMethodSource(Indent indent, AstHostApi api, Method method) {
       final String returnTypeName = _hostApiReturnType(returnType);
       indent.writeln('${_apiVariable(api)}->${_methodName(method)}(');
       indent.nest(1, () {
-        for (final String argument in methodArguments) {
+        for (final argument in methodArguments) {
           indent.writeln('$argument,');
         }
         indent.writeln('[reply_id, on_reply]($returnTypeName&& output) {');
@@ -1073,7 +1072,7 @@ void _writeReturnEncoding(
   indent.writeScoped('if (output.has_error()) {', '}', () {
     indent.writeln('return PigeonFfiEncodeError(codec, $apiName::WrapError(output.error()));');
   });
-  final String wrapperType = hostReturnType.isBuiltin
+  final wrapperType = hostReturnType.isBuiltin
       ? '::flutter::EncodableValue'
       : '::flutter::CustomEncodableValue';
   if (dartReturnType.isNullable) {
@@ -1121,7 +1120,7 @@ void _writeAsyncReplyEncoding(
     );
     indent.writeln('return;');
   });
-  final String wrapperType = hostReturnType.isBuiltin
+  final wrapperType = hostReturnType.isBuiltin
       ? '::flutter::EncodableValue'
       : '::flutter::CustomEncodableValue';
   if (dartReturnType.isNullable) {
@@ -1175,9 +1174,8 @@ if (!$encodableArgName.IsNull()) {
   $argName = &${argName}_value;
 }''');
     } else {
-      final castExpression =
-          'std::any_cast<const ${hostType.datatype}&>('
-          'std::get<::flutter::CustomEncodableValue>($encodableArgName))';
+      final encodableValue = 'std::get<::flutter::CustomEncodableValue>($encodableArgName)';
+      final castExpression = 'std::any_cast<const ${hostType.datatype}&>($encodableValue)';
       indent.writeln(
         'const auto* $argName = $encodableArgName.IsNull() ? nullptr : &($castExpression);',
       );
@@ -1196,9 +1194,8 @@ if (!$encodableArgName.IsNull()) {
       'const auto $argName = static_cast<${hostType.datatype}>($encodableArgName.LongValue());',
     );
   } else {
-    final castExpression =
-        'std::any_cast<const ${hostType.datatype}&>('
-        'std::get<::flutter::CustomEncodableValue>($encodableArgName))';
+    final encodableValue = 'std::get<::flutter::CustomEncodableValue>($encodableArgName)';
+    final castExpression = 'std::any_cast<const ${hostType.datatype}&>($encodableValue)';
     indent.writeln('const auto& $argName = $castExpression;');
   }
 }
@@ -1264,7 +1261,7 @@ String _hostApiReturnType(HostDatatype type) {
   if (type.datatype == 'void') {
     return 'std::optional<FlutterError>';
   }
-  var valueType = type.datatype;
+  String valueType = type.datatype;
   if (type.isNullable) {
     valueType = 'std::optional<$valueType>';
   }
@@ -1274,7 +1271,7 @@ String _hostApiReturnType(HostDatatype type) {
 String _methodName(Method method) => method.name[0].toUpperCase() + method.name.substring(1);
 
 String _safeArgumentName(int count, NamedType argument) {
-  final name = argument.name.isEmpty ? 'arg$count' : _makeVariableName(argument.name);
+  final String name = argument.name.isEmpty ? 'arg$count' : _makeVariableName(argument.name);
   return '${name}_arg';
 }
 
@@ -1350,7 +1347,7 @@ String _eventSinkParameterType(HostDatatype type) {
 }
 
 String _eventEncodableValueExpression(HostDatatype type, String value) {
-  final String wrapperType = type.isBuiltin
+  final wrapperType = type.isBuiltin
       ? '::flutter::EncodableValue'
       : '::flutter::CustomEncodableValue';
   return '$wrapperType($value)';

@@ -156,7 +156,7 @@ void main() {
     final code = sink.toString();
     expect(code, contains("import 'dart:ffi' as ffi;"));
     expect(code, contains("import 'messages.g.ffi.dart' as pigeon_ffi;"));
-    expect(code, contains('Stream<int> streamEvents({String instanceName = \'\'}'));
+    expect(code, contains("Stream<int> streamEvents({String instanceName = ''}"));
     expect(code, contains('StreamController<int>.broadcast'));
     expect(code, contains('NativeCallable<_PigeonFfiEventCallbackNative>'));
     expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));

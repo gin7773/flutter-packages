@@ -59,7 +59,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.header,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -123,7 +123,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.source,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -199,7 +199,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.header,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -222,7 +222,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.source,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -277,7 +277,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.header,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -303,7 +303,7 @@ void main() {
     const CppFfiGenerator().generate(
       OutputFileOptions<InternalCppFfiOptions>(
         fileType: FileType.source,
-        languageOptions: InternalCppFfiOptions(
+        languageOptions: const InternalCppFfiOptions(
           headerIncludePath: 'messages_ffi.h',
           apiHeaderIncludePath: 'messages.h',
           cppFfiHeaderOut: 'messages_ffi.h',
@@ -369,7 +369,7 @@ void main() {
       containsEventChannel: true,
     );
 
-    final errors = validateCppFfi(
+    final List<Error> errors = validateCppFfi(
       const InternalCppFfiOptions(
         headerIncludePath: 'messages_ffi.h',
         apiHeaderIncludePath: 'messages.h',

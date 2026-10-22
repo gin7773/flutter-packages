@@ -58,8 +58,11 @@ class FfiGenConfigGenerator extends Generator<InternalFfiGenConfigOptions> {
     if (generatorOptions.copyrightHeader != null) {
       addLines(indent, generatorOptions.copyrightHeader!, linePrefix: '# ');
     }
-    final dartOut = _pathRelativeToConfig(generatorOptions.configOut, generatorOptions.dartOut);
-    final ffiHeaderPath = _pathRelativeToConfig(
+    final String dartOut = _pathRelativeToConfig(
+      generatorOptions.configOut,
+      generatorOptions.dartOut,
+    );
+    final String ffiHeaderPath = _pathRelativeToConfig(
       generatorOptions.configOut,
       generatorOptions.ffiHeaderPath,
     );
@@ -116,12 +119,12 @@ List<Error> validateFfiGenConfig(InternalFfiGenConfigOptions options, Root root)
 String _normalizePath(String path) => path.replaceAll(r'\', '/');
 
 String _pathRelativeToConfig(String configOut, String targetPath) {
-  final normalizedTargetPath = _normalizePath(targetPath);
+  final String normalizedTargetPath = _normalizePath(targetPath);
   if (_isAbsolutePath(normalizedTargetPath)) {
     return normalizedTargetPath;
   }
 
-  final configDirectory = path.posix.dirname(_normalizePath(configOut));
+  final String configDirectory = path.posix.dirname(_normalizePath(configOut));
   if (configDirectory == '.' || configDirectory.isEmpty) {
     return normalizedTargetPath;
   }

@@ -786,7 +786,7 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     Indent indent, {
     required String dartPackageName,
   }) {
-    final bool usesCppFfi = generatorOptions.ffiOptions != null;
+    final usesCppFfi = generatorOptions.ffiOptions != null;
     if (usesCppFfi) {
       indent.writeln("import 'dart:ffi' as ffi;");
     }
@@ -2359,7 +2359,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     String listenFunctionName,
     String streamType,
   ) {
-    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     indent.writeScoped('onListen: () {', '},', () {
       indent.writeln('final int ${varNamePrefix}sinkId = _pigeonNextFfiEventSinkId++;');
       indent.writeln('${varNamePrefix}activeSinkId = ${varNamePrefix}sinkId;');
@@ -2432,7 +2432,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
   }
 
   void _writeFfiEventOnCancel(Indent indent, String cancelFunctionName) {
-    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     indent.writeScoped('onCancel: () {', '},', () {
       indent.writeln('final int? ${varNamePrefix}sinkId = ${varNamePrefix}activeSinkId;');
       indent.writeScoped('if (${varNamePrefix}sinkId == null) {', '}', () {
@@ -3836,7 +3836,7 @@ if (wrapped == null) {
       _writeFfiAsyncHostMethodCall(indent, api: api, method: method);
       return;
     }
-    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     if (method.parameters.isEmpty) {
       indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
     } else {
@@ -3846,9 +3846,10 @@ if (wrapped == null) {
       ) {
         return getParameterName(index, type);
       });
+      final argList = '<Object?>[${argExpressions.join(', ')}]';
       indent.writeln(
-        'final ByteData? ${varNamePrefix}requestMessage = $pigeonChannelCodec.encodeMessage('
-        '<Object?>[${argExpressions.join(', ')}]);',
+        'final ByteData? ${varNamePrefix}requestMessage = '
+        '$pigeonChannelCodec.encodeMessage($argList);',
       );
       indent.writeln(
         'final $requestType ${varNamePrefix}request = '
@@ -3856,7 +3857,7 @@ if (wrapped == null) {
       );
     }
     indent.writeln(
-      'final String ${varNamePrefix}channelName = \'${_ffiFunctionName(api, method)}\';',
+      "final String ${varNamePrefix}channelName = '${_ffiFunctionName(api, method)}';",
     );
     indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
     indent.writeln('try {');
@@ -3900,7 +3901,7 @@ _extractReplyValueOrThrow(
     required AstHostApi api,
     required Method method,
   }) {
-    final String requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
+    const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     if (method.parameters.isEmpty) {
       indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
     } else {
@@ -3910,9 +3911,10 @@ _extractReplyValueOrThrow(
       ) {
         return getParameterName(index, type);
       });
+      final argList = '<Object?>[${argExpressions.join(', ')}]';
       indent.writeln(
-        'final ByteData? ${varNamePrefix}requestMessage = $pigeonChannelCodec.encodeMessage('
-        '<Object?>[${argExpressions.join(', ')}]);',
+        'final ByteData? ${varNamePrefix}requestMessage = '
+        '$pigeonChannelCodec.encodeMessage($argList);',
       );
       indent.writeln(
         'final $requestType ${varNamePrefix}request = '
@@ -3920,7 +3922,7 @@ _extractReplyValueOrThrow(
       );
     }
     indent.writeln(
-      'final String ${varNamePrefix}channelName = \'${_ffiFunctionName(api, method)}\';',
+      "final String ${varNamePrefix}channelName = '${_ffiFunctionName(api, method)}';",
     );
     indent.writeln(
       'final Completer<${addGenericTypes(method.returnType)}> ${varNamePrefix}completer = '

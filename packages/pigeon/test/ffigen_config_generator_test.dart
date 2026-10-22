@@ -4,6 +4,7 @@
 
 import 'package:pigeon/src/ast.dart';
 import 'package:pigeon/src/ffi/ffigen_config_generator.dart';
+import 'package:pigeon/src/pigeon_lib.dart';
 import 'package:test/test.dart';
 
 const String _packageName = 'test_package';
@@ -68,7 +69,7 @@ void main() {
   test('validates required paths', () {
     final root = Root(apis: <Api>[], classes: <Class>[], enums: <Enum>[]);
 
-    final errors = validateFfiGenConfig(
+    final List<Error> errors = validateFfiGenConfig(
       const InternalFfiGenConfigOptions(
         configOut: 'stdout',
         dartOut: '',
