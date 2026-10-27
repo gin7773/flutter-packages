@@ -13,8 +13,11 @@
 * [dart] Allows isolates to exit when C++ FFI requests and event subscriptions
   finish, while retaining shared callbacks for reuse and queued notifications.
 * [cpp] Rejects incompatible API and FFI namespaces before generating code.
-* Requires separate Pigeon configurations and Dart outputs for C++ Dart FFI and
-  Swift FFI/Kotlin JNI.
+
+## 29.0.11
+
+* [swift] Warns after FFI code generation if the `objective_c` version constraint in `pubspec.yaml` does not match the generated `ObjCVersionCheck`.
+* [kotlin] Warns after JNI code generation if the `jni` version constraint in `pubspec.yaml` does not match the generated `JniVersionCheck`.
 
 ## 29.0.10
 
