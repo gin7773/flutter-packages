@@ -16,7 +16,7 @@ import 'generator.dart';
 /// The current version of pigeon.
 ///
 /// This must match the version in pubspec.yaml.
-const String pigeonVersion = '29.1.1';
+const String pigeonVersion = '29.1.2';
 
 /// Default plugin package name.
 const String defaultPluginPackageName = 'dev.flutter.pigeon';
@@ -27,6 +27,16 @@ const String defaultNativeInteropInstanceName =
 
 /// Converts any path containing Windows backslashes into a POSIX-style path.
 String posixPath(String inputPath) => inputPath.replaceAll(r'\', '/');
+
+/// Returns a C symbol prefix unique to a package and configured FFI header path.
+String makeCppFfiSymbolPrefix(String dartPackageName, String headerPath) {
+  String encode(String value) => value.replaceAllMapped(
+    RegExp(r'[^a-z0-9]'),
+    (Match match) => '_x${match[0]!.codeUnitAt(0).toRadixString(16)}_',
+  );
+
+  return 'pigeon_${encode(dartPackageName)}_${encode(path.posix.normalize(posixPath(headerPath)))}_';
+}
 
 /// Returns the filename for generated FFIgen config files based on [inputPath].
 String getFfigenConfigFileName([String? inputPath]) {

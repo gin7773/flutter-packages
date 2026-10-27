@@ -1,0 +1,38 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi' as ffi;
+import 'dart:typed_data';
+import 'package:ffi/ffi.dart' as pkg_ffi;
+import 'bindings.dart' as pigeon_ffi;
+
+// This fixture exercises generated FFI transport and callback lifetime on the
+// Dart VM. Codec behavior is tested separately; JSON keeps the fixture independent
+// of Flutter's dart:ui runtime.
+abstract class MessageCodec<T> {
+  const MessageCodec();
+  ByteData? encodeMessage(T message);
+  T decodeMessage(ByteData message);
+}
+
+class _PigeonCodec extends MessageCodec<Object?> {
+  const _PigeonCodec();
+  @override
+  ByteData encodeMessage(Object? message) =>
+      ByteData.sublistView(Uint8List.fromList(utf8.encode(jsonEncode(message))));
+  @override
+  Object? decodeMessage(ByteData message) => jsonDecode(utf8.decode(
+      message.buffer.asUint8List(message.offsetInBytes, message.lengthInBytes)));
+}
+
+class BinaryMessenger {}
+
+class PlatformException implements Exception {
+  PlatformException({required this.code, this.message, this.details});
+  final String code;
+  final String? message;
+  final Object? details;
+}

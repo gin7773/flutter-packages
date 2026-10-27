@@ -126,11 +126,15 @@ class CppFfiGenerator extends Generator<OutputFileOptions<InternalCppFfiOptions>
     );
 
     final indent = Indent();
+    final String symbolPrefix = makeCppFfiSymbolPrefix(
+      dartPackageName,
+      generatorOptions.languageOptions.cppFfiHeaderOut,
+    );
     _writeFilePrologue(generatorOptions.languageOptions, indent);
     if (generatorOptions.fileType == FileType.header) {
-      _writeHeader(generatorOptions.languageOptions, root, indent);
+      _writeHeader(generatorOptions.languageOptions, root, indent, symbolPrefix);
     } else {
-      _writeSource(generatorOptions.languageOptions, root, indent);
+      _writeSource(generatorOptions.languageOptions, root, indent, symbolPrefix);
     }
     sink.write(indent.toString());
   }
@@ -145,8 +149,8 @@ void _writeFilePrologue(InternalCppFfiOptions generatorOptions, Indent indent) {
   indent.newln();
 }
 
-void _writeHeader(InternalCppFfiOptions options, Root root, Indent indent) {
-  final String guardName = _getGuardName(options.headerIncludePath);
+void _writeHeader(InternalCppFfiOptions options, Root root, Indent indent, String symbolPrefix) {
+  final String guardName = _getGuardName(symbolPrefix);
   indent.writeln('#ifndef $guardName');
   indent.writeln('#define $guardName');
   indent.newln();
@@ -174,6 +178,8 @@ void _writeHeader(InternalCppFfiOptions options, Root root, Indent indent) {
   indent.writeln('#endif');
   indent.newln();
   indent.format(r'''
+#ifndef PIGEON_FFI_ABI_TYPES_
+#define PIGEON_FFI_ABI_TYPES_
 typedef struct PigeonFfiBuffer {
   uint8_t* data;
   size_t length;
@@ -182,16 +188,17 @@ typedef struct PigeonFfiBuffer {
 typedef void (*PigeonFfiReplyCallback)(int64_t reply_id, PigeonFfiBuffer* reply);
 typedef void (*PigeonFfiEventCallback)(int64_t sink_id, PigeonFfiBuffer* event);
 typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
+#endif  // PIGEON_FFI_ABI_TYPES_
 ''');
   indent.writeln('// Frees a buffer returned by a generated FFI function.');
-  indent.writeln('PIGEON_FFI_EXPORT void pigeon_free_buffer(PigeonFfiBuffer* buffer);');
+  indent.writeln('PIGEON_FFI_EXPORT void ${symbolPrefix}free_buffer(PigeonFfiBuffer* buffer);');
   indent.writeln(
-    '// The caller owns request; the returned buffer must be freed with pigeon_free_buffer.',
+    '// The caller owns request; free returned buffers with ${symbolPrefix}free_buffer.',
   );
   for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
     for (final Method method in api.methods) {
       if (method.isAsynchronous || method.isAsynchronousCallback) {
-        indent.writeln('PIGEON_FFI_EXPORT void ${_ffiFunctionName(api, method)}(');
+        indent.writeln('PIGEON_FFI_EXPORT void ${_ffiFunctionName(api, method, symbolPrefix)}(');
         indent.nest(1, () {
           indent.writeln('PigeonFfiBuffer* request,');
           indent.writeln('int64_t reply_id,');
@@ -199,7 +206,7 @@ typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
         });
       } else {
         indent.writeln(
-          'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request);',
+          'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_ffiFunctionName(api, method, symbolPrefix)}(PigeonFfiBuffer* request);',
         );
       }
     }
@@ -207,7 +214,7 @@ typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
   for (final AstEventChannelApi api in root.apis.whereType<AstEventChannelApi>()) {
     for (final Method method in api.methods) {
       indent.writeln(
-        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_eventListenFunctionName(api, method)}(',
+        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_eventListenFunctionName(api, method, symbolPrefix)}(',
       );
       indent.nest(1, () {
         indent.writeln('PigeonFfiBuffer* request,');
@@ -217,7 +224,7 @@ typedef void (*PigeonFfiDoneCallback)(int64_t sink_id);
         indent.writeln('PigeonFfiDoneCallback on_done);');
       });
       indent.writeln(
-        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_eventCancelFunctionName(api, method)}(',
+        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_eventCancelFunctionName(api, method, symbolPrefix)}(',
       );
       indent.nest(1, () {
         indent.writeln('PigeonFfiBuffer* request,');
@@ -332,7 +339,7 @@ void _writeEventChannelSetUpDeclaration(Indent indent, AstEventChannelApi api, M
   });
 }
 
-void _writeSource(InternalCppFfiOptions options, Root root, Indent indent) {
+void _writeSource(InternalCppFfiOptions options, Root root, Indent indent, String symbolPrefix) {
   indent.writeln('#include "${options.headerIncludePath}"');
   indent.newln();
   indent.writeln('#include <any>');
@@ -344,7 +351,7 @@ void _writeSource(InternalCppFfiOptions options, Root root, Indent indent) {
   indent.newln();
   indent.writeln('namespace {');
   indent.nest(1, () {
-    indent.format(r'''
+    indent.format('''
 PigeonFfiBuffer* PigeonFfiMakeBuffer(const std::vector<uint8_t>& message) {
   auto* buffer = new PigeonFfiBuffer();
   buffer->length = message.size();
@@ -385,7 +392,7 @@ void PigeonFfiSendReply(
     PigeonFfiReplyCallback on_reply,
     PigeonFfiBuffer* reply) {
   if (on_reply == nullptr) {
-    pigeon_free_buffer(reply);
+    ${symbolPrefix}free_buffer(reply);
     return;
   }
   on_reply(reply_id, reply);
@@ -394,8 +401,8 @@ void PigeonFfiSendReply(
   });
   indent.writeln('}  // namespace');
   indent.newln();
-  indent.format(r'''
-void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
+  indent.format('''
+void ${symbolPrefix}free_buffer(PigeonFfiBuffer* buffer) {
   if (buffer == nullptr) {
     return;
   }
@@ -427,7 +434,7 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
           ? _ffiDispatchHelperName(api, method)
           : '${options.namespace}::${_ffiDispatchHelperName(api, method)}';
       if (method.isAsynchronous || method.isAsynchronousCallback) {
-        indent.writeln('extern "C" void ${_ffiFunctionName(api, method)}(');
+        indent.writeln('extern "C" void ${_ffiFunctionName(api, method, symbolPrefix)}(');
         indent.nest(1, () {
           indent.writeln('PigeonFfiBuffer* request,');
           indent.writeln('int64_t reply_id,');
@@ -440,7 +447,7 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
         indent.newln();
       } else {
         indent.writeln(
-          'extern "C" PigeonFfiBuffer* ${_ffiFunctionName(api, method)}(PigeonFfiBuffer* request) {',
+          'extern "C" PigeonFfiBuffer* ${_ffiFunctionName(api, method, symbolPrefix)}(PigeonFfiBuffer* request) {',
         );
         indent.nest(1, () {
           indent.writeln('return $qualifiedHelper(request);');
@@ -455,7 +462,9 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
       final String qualifiedListenHelper = options.namespace == null
           ? _eventListenDispatchHelperName(api, method)
           : '${options.namespace}::${_eventListenDispatchHelperName(api, method)}';
-      indent.writeln('extern "C" PigeonFfiBuffer* ${_eventListenFunctionName(api, method)}(');
+      indent.writeln(
+        'extern "C" PigeonFfiBuffer* ${_eventListenFunctionName(api, method, symbolPrefix)}(',
+      );
       indent.nest(1, () {
         indent.writeln('PigeonFfiBuffer* request,');
         indent.writeln('int64_t sink_id,');
@@ -474,7 +483,9 @@ void pigeon_free_buffer(PigeonFfiBuffer* buffer) {
       final String qualifiedCancelHelper = options.namespace == null
           ? _eventCancelDispatchHelperName(api, method)
           : '${options.namespace}::${_eventCancelDispatchHelperName(api, method)}';
-      indent.writeln('extern "C" PigeonFfiBuffer* ${_eventCancelFunctionName(api, method)}(');
+      indent.writeln(
+        'extern "C" PigeonFfiBuffer* ${_eventCancelFunctionName(api, method, symbolPrefix)}(',
+      );
       indent.nest(1, () {
         indent.writeln('PigeonFfiBuffer* request,');
         indent.writeln('int64_t sink_id) {');
@@ -1170,7 +1181,7 @@ void _writeEncodableValueArgumentUnwrapping(
 ${hostType.datatype} ${argName}_value;
 const ${hostType.datatype}* $argName = nullptr;
 if (!$encodableArgName.IsNull()) {
-  ${argName}_value = static_cast<${hostType.datatype}>($encodableArgName.LongValue());
+  ${argName}_value = std::any_cast<const ${hostType.datatype}&>(std::get<::flutter::CustomEncodableValue>($encodableArgName));
   $argName = &${argName}_value;
 }''');
     } else {
@@ -1189,10 +1200,6 @@ if (!$encodableArgName.IsNull()) {
     indent.writeln('const auto& $argName = $encodableArgName;');
   } else if (hostType.isBuiltin) {
     indent.writeln('const auto& $argName = std::get<${hostType.datatype}>($encodableArgName);');
-  } else if (hostType.isEnum) {
-    indent.writeln(
-      'const auto $argName = static_cast<${hostType.datatype}>($encodableArgName.LongValue());',
-    );
   } else {
     final encodableValue = 'std::get<::flutter::CustomEncodableValue>($encodableArgName)';
     final castExpression = 'std::any_cast<const ${hostType.datatype}&>($encodableValue)';
@@ -1235,9 +1242,7 @@ List<Error> validateCppFfi(InternalCppFfiOptions options, Root root) {
   return errors;
 }
 
-String _getGuardName(String headerFileName) {
-  return 'PIGEON_${headerFileName.replaceAll('.', '_').replaceAll(RegExp(r'[^A-Za-z0-9_]'), '_').toUpperCase()}_';
-}
+String _getGuardName(String symbolPrefix) => '${symbolPrefix.toUpperCase()}HEADER_';
 
 String? _baseCppTypeForBuiltinDartType(TypeDeclaration type) {
   const cppTypeForDartTypeMap = <String, String>{
@@ -1279,8 +1284,8 @@ String _makeVariableName(String name) {
   return name.replaceAllMapped(RegExp(r'[A-Z]'), (Match match) => '_${match[0]!.toLowerCase()}');
 }
 
-String _ffiFunctionName(AstHostApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}';
+String _ffiFunctionName(AstHostApi api, Method method, String symbolPrefix) {
+  return '$symbolPrefix${_snakeCase(api.name)}_${_snakeCase(method.name)}';
 }
 
 String _ffiHelperName(AstHostApi api, Method method) {
@@ -1295,12 +1300,12 @@ String _apiVariable(AstHostApi api) => 'g_${_snakeCase(api.name)}_api';
 
 String _dispatcherVariable(AstHostApi api) => 'g_${_snakeCase(api.name)}_dispatcher';
 
-String _eventListenFunctionName(AstEventChannelApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_listen';
+String _eventListenFunctionName(AstEventChannelApi api, Method method, String symbolPrefix) {
+  return '$symbolPrefix${_snakeCase(api.name)}_${_snakeCase(method.name)}_listen';
 }
 
-String _eventCancelFunctionName(AstEventChannelApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_cancel';
+String _eventCancelFunctionName(AstEventChannelApi api, Method method, String symbolPrefix) {
+  return '$symbolPrefix${_snakeCase(api.name)}_${_snakeCase(method.name)}_cancel';
 }
 
 String _eventSinkName(AstEventChannelApi api, Method method) {

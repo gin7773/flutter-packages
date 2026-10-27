@@ -135,8 +135,12 @@ cppFfiOptions: CppFfiOptions(
 
 The C++ FFI adapter uses `cppOptions.namespace` by default so that
 `SetUpMyApiFfi` and the generated C++ API classes live in the same namespace.
-Set `cppFfiOptions.namespace` only if the FFI adapter must use a different
-namespace from the regular generated C++ API.
+When both C++ outputs are generated and `cppFfiOptions.apiHeaderIncludePath` is
+omitted, an explicit `cppFfiOptions.namespace` must match
+`cppOptions.namespace`; mismatches are rejected before generation. When
+`cppFfiOptions.apiHeaderIncludePath` is set, `cppFfiOptions.namespace` must
+match the API namespace in that header, whether it was just generated or
+already existed.
 
 If the target C++ toolchain cannot compile `std::visit` with
 `flutter::EncodableValue`, disable it for the regular C++ generator:
@@ -278,6 +282,16 @@ lifetime unless it copies the data it needs.
 Make sure both `messages.cc` and `messages_ffi.cc` are included in the native
 build.
 
+C ABI exports include a prefix derived from the Dart package name and configured
+FFI header path, allowing different generated adapters in the same native
+library. The generated ffigen configuration renames these exports to the stable
+`pigeon_*` Dart binding methods. Regenerate the C++ adapters and ffigen bindings
+together after upgrading Pigeon or changing the header path.
+
+The shared Dart callbacks keep an isolate alive only while async requests or
+event subscriptions are active. They remain available for reuse and for native
+notifications already queued when a subscription is canceled.
+
 ## FFI Event Streams
 
 When Dart FFI is enabled, `@EventChannelApi` methods generate FFI-backed Dart
@@ -324,6 +338,9 @@ errors with `sink->Error(error)`, and closes the Dart stream with
 passed to C++ as `instance_name`, so plugins can keep one sink per player.
 The stream handler and dispatcher pointers passed to `SetUp...Ffi` must remain
 valid for as long as Dart can listen to the FFI stream.
+`OnCancel` must stop all native producers that can use that subscription's sink
+before returning, including error paths. Queued notifications are still consumed
+and their buffers freed after cancellation; new notifications must not be sent.
 
 ## Limitations
 

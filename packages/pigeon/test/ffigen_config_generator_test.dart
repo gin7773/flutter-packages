@@ -4,6 +4,7 @@
 
 import 'package:pigeon/src/ast.dart';
 import 'package:pigeon/src/ffi/ffigen_config_generator.dart';
+import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/pigeon_lib.dart';
 import 'package:test/test.dart';
 
@@ -38,7 +39,9 @@ void main() {
     expect(code, contains('include-directives:'));
     expect(code, contains("  - '**/messages_ffi.h'"));
     expect(code, contains('functions:'));
-    expect(code, contains("  - 'pigeon_.*'"));
+    final String symbolPrefix = makeCppFfiSymbolPrefix(_packageName, 'windows/messages_ffi.h');
+    expect(code, contains("  - '$symbolPrefix.*'"));
+    expect(code, contains("'$symbolPrefix(.*)': 'pigeon_\$1'"));
     expect(code, contains('structs:'));
     expect(code, contains("  - 'PigeonFfiBuffer'"));
   });

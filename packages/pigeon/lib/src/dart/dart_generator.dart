@@ -2388,6 +2388,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       indent.writeln('$requestType ${varNamePrefix}response = ffi.nullptr;');
       indent.writeln('try {');
       indent.nest(1, () {
+        indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
         indent.writeln(
           '${varNamePrefix}response = '
           '$_defaultPigeonFfiBindings.$listenFunctionName(',
@@ -2416,6 +2417,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       indent.nest(1, () {
         indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
         indent.writeln('${varNamePrefix}activeSinkId = null;');
+        indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
         indent.writeln('${varNamePrefix}controller.addError(error, stackTrace);');
       });
       indent.writeln('} finally {');
@@ -2471,6 +2473,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       indent.nest(1, () {
         indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
         indent.writeln('${varNamePrefix}activeSinkId = null;');
+        indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
         indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
         indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
           indent.writeln(
@@ -3466,7 +3469,13 @@ final Map<int, _PigeonFfiAsyncReply> _pigeonFfiAsyncReplies =
 int _pigeonNextFfiAsyncReplyId = 1;
 
 final ffi.NativeCallable<_PigeonFfiReplyCallbackNative> _pigeonFfiReplyCallback =
-\t\tffi.NativeCallable<_PigeonFfiReplyCallbackNative>.listener(_handlePigeonFfiReply);
+\t\tffi.NativeCallable<_PigeonFfiReplyCallbackNative>.listener(_handlePigeonFfiReply)
+\t\t\t..keepIsolateAlive = false;
+
+// Cache the callback for reuse; only unfinished requests keep the isolate alive.
+void _updatePigeonFfiReplyCallbackKeepAlive() {
+\t_pigeonFfiReplyCallback.keepIsolateAlive = _pigeonFfiAsyncReplies.isNotEmpty;
+}
 
 void _handlePigeonFfiReply(
 \t\tint replyId,
@@ -3489,6 +3498,7 @@ void _handlePigeonFfiReply(
 \t\tif (reply != ffi.nullptr) {
 \t\t\t(asyncReply?.ffiBindings ?? $_defaultPigeonFfiBindings).pigeon_free_buffer(reply);
 \t\t}
+\t\t_updatePigeonFfiReplyCallbackKeepAlive();
 \t}
 }
 ''');
@@ -3538,12 +3548,16 @@ class _PigeonFfiEventControllerImpl<T> implements _PigeonFfiEventController {
 
 \t@override
 \tvoid addEvent(Object? event) {
-\t\tcontroller.add(decodeEvent(event));
+\t\tif (!controller.isClosed) {
+\t\t\tcontroller.add(decodeEvent(event));
+\t\t}
 \t}
 
 \t@override
 \tvoid addError(Object error, StackTrace stackTrace) {
-\t\tcontroller.addError(error, stackTrace);
+\t\tif (!controller.isClosed) {
+\t\t\tcontroller.addError(error, stackTrace);
+\t\t}
 \t}
 
 \t@override
@@ -3557,11 +3571,23 @@ final Map<int, _PigeonFfiEventController> _pigeonFfiEventControllers =
 int _pigeonNextFfiEventSinkId = 1;
 
 final ffi.NativeCallable<_PigeonFfiEventCallbackNative> _pigeonFfiOnEventCallback =
-\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiEvent);
+\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiEvent)
+\t\t\t..keepIsolateAlive = false;
 final ffi.NativeCallable<_PigeonFfiEventCallbackNative> _pigeonFfiOnErrorCallback =
-\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiError);
+\t\tffi.NativeCallable<_PigeonFfiEventCallbackNative>.listener(_handlePigeonFfiError)
+\t\t\t..keepIsolateAlive = false;
 final ffi.NativeCallable<_PigeonFfiDoneCallbackNative> _pigeonFfiOnDoneCallback =
-\t\tffi.NativeCallable<_PigeonFfiDoneCallbackNative>.listener(_handlePigeonFfiDone);
+\t\tffi.NativeCallable<_PigeonFfiDoneCallbackNative>.listener(_handlePigeonFfiDone)
+\t\t\t..keepIsolateAlive = false;
+
+// Keep callbacks valid for queued notifications after cancellation, while idle
+// callbacks must not prevent the isolate from exiting.
+void _updatePigeonFfiEventCallbackKeepAlive() {
+\tfinal bool keepAlive = _pigeonFfiEventControllers.isNotEmpty;
+\t_pigeonFfiOnEventCallback.keepIsolateAlive = keepAlive;
+\t_pigeonFfiOnErrorCallback.keepIsolateAlive = keepAlive;
+\t_pigeonFfiOnDoneCallback.keepIsolateAlive = keepAlive;
+}
 
 void _handlePigeonFfiEvent(
 \t\tint sinkId,
@@ -3606,7 +3632,7 @@ void _handlePigeonFfiError(
 
 void _handlePigeonFfiDone(int sinkId) {
 \tfinal _PigeonFfiEventController? controller =
-\t\t\t_pigeonFfiEventControllers.remove(sinkId);
+\t\t\t_pigeonFfiEventControllers[sinkId];
 \tcontroller?.close();
 }
 ''');
@@ -3956,6 +3982,7 @@ _extractReplyValueOrThrow(
     );
     indent.writeln('try {');
     indent.nest(1, () {
+      indent.writeln('_updatePigeonFfiReplyCallbackKeepAlive();');
       indent.writeln('$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(');
       indent.nest(1, () {
         indent.writeln('${varNamePrefix}request,');
@@ -3974,6 +4001,7 @@ _extractReplyValueOrThrow(
     indent.writeln('} finally {');
     indent.nest(1, () {
       indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+      indent.writeln('_updatePigeonFfiReplyCallbackKeepAlive();');
     });
     indent.writeln('}');
     if (method.returnType.isVoid) {

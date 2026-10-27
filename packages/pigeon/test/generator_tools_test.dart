@@ -48,6 +48,27 @@ final Class emptyClass = Class(
 );
 
 void main() {
+  test('C++ FFI symbol prefixes isolate packages and header paths', () {
+    final prefixes = <String>{
+      for (final (String packageName, String header) in <(String, String)>[
+        ('video', 'first/messages.h'),
+        ('video', 'first/Messages.h'),
+        ('video', 'second/messages.h'),
+        ('audio', 'first/messages.h'),
+        ('video', 'first_messages.h'),
+        ('video', 'first-messages.h'),
+        ('video', 'first_x2d_messages.h'),
+      ])
+        makeCppFfiSymbolPrefix(packageName, header),
+    };
+    expect(prefixes, hasLength(7));
+    expect(prefixes.every(RegExp(r'^pigeon_[A-Za-z0-9_]+_$').hasMatch), isTrue);
+    expect(
+      makeCppFfiSymbolPrefix('video', r'first\messages.h'),
+      makeCppFfiSymbolPrefix('video', 'first/messages.h'),
+    );
+  });
+
   test('test merge maps', () {
     final source = <String, Object>{
       '1': '1',

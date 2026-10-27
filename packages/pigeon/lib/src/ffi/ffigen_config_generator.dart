@@ -55,6 +55,10 @@ class FfiGenConfigGenerator extends Generator<InternalFfiGenConfigOptions> {
     required String dartPackageName,
   }) {
     final indent = Indent();
+    final String symbolPrefix = makeCppFfiSymbolPrefix(
+      dartPackageName,
+      generatorOptions.ffiHeaderPath,
+    );
     if (generatorOptions.copyrightHeader != null) {
       addLines(indent, generatorOptions.copyrightHeader!, linePrefix: '# ');
     }
@@ -87,7 +91,12 @@ class FfiGenConfigGenerator extends Generator<InternalFfiGenConfigOptions> {
     indent.nest(1, () {
       indent.writeln('include:');
       indent.nest(1, () {
-        indent.writeln("- 'pigeon_.*'");
+        indent.writeln("- '$symbolPrefix.*'");
+      });
+      // Keep the Dart binding API independent of the native symbol prefix.
+      indent.writeln('rename:');
+      indent.nest(1, () {
+        indent.writeln("'$symbolPrefix(.*)': 'pigeon_\$1'");
       });
     });
     indent.writeln('structs:');

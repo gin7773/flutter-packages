@@ -277,6 +277,69 @@ void main() {
     expect(options.cppFfiOptions?.namespace, equals('my_plugin_ffi'));
   });
 
+  test('rejects mismatched generated C++ API and FFI namespaces', () {
+    for (final apiNamespace in <String?>[null, 'my_plugin']) {
+      final List<Error> errors = validatePigeonOptions(
+        PigeonOptions(
+          cppHeaderOut: 'messages.h',
+          cppSourceOut: 'messages.cc',
+          cppOptions: CppOptions(namespace: apiNamespace),
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          cppFfiOptions: const CppFfiOptions(namespace: 'other_namespace'),
+        ),
+      );
+      expect(errors, hasLength(1));
+      expect(errors.single.message, contains('cppFfiOptions.namespace must match'));
+    }
+  });
+
+  test('allows an explicit namespace for an existing C++ API header', () {
+    for (final generateCppApi in <bool>[false, true]) {
+      expect(
+        validatePigeonOptions(
+          PigeonOptions(
+            cppHeaderOut: generateCppApi ? 'generated_messages.h' : null,
+            cppSourceOut: generateCppApi ? 'generated_messages.cc' : null,
+            cppOptions: const CppOptions(namespace: 'generated_api'),
+            cppFfiHeaderOut: 'messages_ffi.h',
+            cppFfiSourceOut: 'messages_ffi.cc',
+            cppFfiOptions: const CppFfiOptions(
+              namespace: 'existing_api',
+              apiHeaderIncludePath: 'existing_messages.h',
+            ),
+          ),
+        ),
+        isEmpty,
+      );
+    }
+  });
+
+  test('namespace mismatch is rejected before creating outputs', () async {
+    final Directory dir = Directory.systemTemp.createTempSync();
+    try {
+      final input = File(path.join(dir.path, 'input.dart'))..createSync();
+      final ParseResults results = parseSource('@HostApi() abstract class Api { int value(); }');
+      final int result = await Pigeon.runWithOptions(
+        PigeonOptions(
+          input: input.path,
+          basePath: dir.path,
+          cppHeaderOut: 'messages.h',
+          cppSourceOut: 'messages.cc',
+          cppOptions: const CppOptions(namespace: 'api'),
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          cppFfiOptions: const CppFfiOptions(namespace: 'bridge'),
+        ),
+        parseResults: results,
+      );
+      expect(result, 1);
+      expect(dir.listSync().map((FileSystemEntity entry) => entry.path), <String>[input.path]);
+    } finally {
+      dir.deleteSync(recursive: true);
+    }
+  });
+
   test('ffigen config path is inferred from input path', () {
     final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
       const PigeonOptions(
@@ -2376,6 +2439,7 @@ abstract class EventApi {
       final String cppSourceCode = cppSourceFile.readAsStringSync();
       final String cppFfiHeaderCode = cppFfiHeaderFile.readAsStringSync();
       final String cppFfiSourceCode = cppFfiSourceFile.readAsStringSync();
+      final String symbolPrefix = makeCppFfiSymbolPrefix('test_plugin', 'tizen/messages_ffi.h');
       final String ffigenConfigCode = ffigenConfigFile.readAsStringSync();
 
       expect(dartCode, contains('MessagesFfiBindings'));
@@ -2388,9 +2452,9 @@ abstract class EventApi {
       expect(cppHeaderCode, contains('namespace test_plugin {'));
       expect(cppSourceCode, contains('Api::GetCodec'));
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
-      expect(cppFfiHeaderCode, contains('pigeon_api_add'));
-      expect(cppFfiHeaderCode, contains('PIGEON_FFI_EXPORT void pigeon_api_initialize('));
-      expect(cppFfiHeaderCode, contains('pigeon_event_api_stream_events_listen'));
+      expect(cppFfiHeaderCode, contains('${symbolPrefix}api_add'));
+      expect(cppFfiHeaderCode, contains('PIGEON_FFI_EXPORT void ${symbolPrefix}api_initialize('));
+      expect(cppFfiHeaderCode, contains('${symbolPrefix}event_api_stream_events_listen'));
       expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
       expect(cppFfiHeaderCode, contains('class PigeonFfiSyncDispatcher'));
       expect(cppFfiHeaderCode, contains('class PigeonEventApiStreamEventsStreamHandler'));

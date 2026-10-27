@@ -150,6 +150,21 @@ List<Error> validatePigeonOptions(PigeonOptions options) {
 
   final hasCppFfiHeaderOut = options.cppFfiHeaderOut != null;
   final hasCppFfiSourceOut = options.cppFfiSourceOut != null;
+  if (hasCppFfiHeaderOut &&
+      options.cppHeaderOut != null &&
+      options.cppSourceOut != null &&
+      options.cppFfiOptions?.apiHeaderIncludePath == null &&
+      options.cppFfiOptions?.namespace != null &&
+      options.cppFfiOptions!.namespace != options.cppOptions?.namespace) {
+    errors.add(
+      Error(
+        message:
+            'cppFfiOptions.namespace must match cppOptions.namespace when both '
+            'C++ outputs are generated without an explicit API header path. '
+            'Omit cppFfiOptions.namespace to use the C++ API namespace.',
+      ),
+    );
+  }
   if (hasCppFfiHeaderOut != hasCppFfiSourceOut) {
     errors.add(
       Error(

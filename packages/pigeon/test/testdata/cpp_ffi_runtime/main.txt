@@ -1,0 +1,102 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+void check(bool condition, String message) {
+  if (!condition) throw StateError(message);
+}
+
+void checkEventKeepAlive(bool expected) {
+  check(_pigeonFfiOnEventCallback.keepIsolateAlive == expected, 'event keep-alive');
+  check(_pigeonFfiOnErrorCallback.keepIsolateAlive == expected, 'error keep-alive');
+  check(_pigeonFfiOnDoneCallback.keepIsolateAlive == expected, 'done keep-alive');
+}
+
+Future<void> main() async {
+  final bindings = pigeon_ffi.NativeLibrary(ffi.DynamicLibrary.process());
+  final api = Api(ffiBindings: bindings);
+  final first = api.work();
+  final second = api.work();
+  final callback = _pigeonFfiReplyCallback.nativeFunction;
+  check(_pigeonFfiReplyCallback.keepIsolateAlive, 'pending requests must keep alive');
+  bindings.reply(<Object?>[7]);
+  check(await first == 7, 'first reply');
+  check(_pigeonFfiReplyCallback.keepIsolateAlive, 'second request still pending');
+  bindings.reply(<Object?>[9]);
+  check(await second == 9, 'second reply');
+  check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'requests completed');
+
+  final third = api.work();
+  check(_pigeonFfiReplyCallback.nativeFunction == callback, 'callback must be reused');
+  check(_pigeonFfiReplyCallback.keepIsolateAlive, 'reused callback must keep alive');
+  bindings.reply(<Object?>['native', 'failure', null]);
+  try {
+    await third;
+    throw StateError('Expected native failure.');
+  } on PlatformException catch (error) {
+    check(error.code == 'native', 'native error must propagate');
+  }
+  check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'failed reply completed');
+  bindings.failStart = true;
+  try {
+    await api.work();
+    throw StateError('Expected startup failure.');
+  } on StateError catch (error) {
+    check(error.message == 'Cannot start request.', 'startup error must propagate');
+  }
+  check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'startup failure cleared');
+
+  final event = Completer<int>();
+  final errors = <Object>[];
+  final done = Completer<void>();
+  final firstStream = events(instanceName: 'first');
+  final subscription = firstStream.listen(event.complete, onError: errors.add);
+  final other = events(instanceName: 'second').listen((_) {}, onDone: done.complete);
+  final ids = _pigeonFfiEventControllers.keys.toList();
+  checkEventKeepAlive(true);
+  final notify = _pigeonFfiOnEventCallback.nativeFunction
+      .asFunction<void Function(int, ffi.Pointer<pigeon_ffi.PigeonFfiBuffer>)>();
+  notify(ids.first, pigeon_ffi.NativeLibrary.buffer(42));
+  check(await event.future == 42, 'event must be delivered');
+  notify(ids.first, pigeon_ffi.NativeLibrary.buffer(99));
+  await subscription.cancel();
+  checkEventKeepAlive(true);
+  await pigeon_ffi.NativeLibrary.waitForBuffers();
+  check(errors.isEmpty, 'queued canceled event must be ignored');
+
+  _pigeonFfiOnDoneCallback.nativeFunction.asFunction<void Function(int)>()(ids.last);
+  await done.future;
+  checkEventKeepAlive(false);
+  check(_pigeonFfiEventControllers.isEmpty, 'completed stream must cancel native sink');
+
+  // A broadcast stream can be subscribed to again after its last listener cancels.
+  final reused = firstStream.listen((_) {});
+  checkEventKeepAlive(true);
+  final lastId = _pigeonFfiEventControllers.keys.single;
+  notify(lastId, pigeon_ffi.NativeLibrary.buffer(100));
+  await reused.cancel();
+  checkEventKeepAlive(false);
+  await pigeon_ffi.NativeLibrary.waitForBuffers();
+
+  pigeon_ffi.NativeLibrary.failListen = true;
+  final listenError = Completer<Object>();
+  final failed = events().listen((_) {}, onError: listenError.complete);
+  check(await listenError.future is PlatformException, 'listen error must propagate');
+  checkEventKeepAlive(false);
+  await failed.cancel();
+  pigeon_ffi.NativeLibrary.failListen = false;
+
+  pigeon_ffi.NativeLibrary.failCancel = true;
+  final cancelError = Completer<Object>();
+  await runZonedGuarded<Future<void>>(() async {
+    final cancelFailure = events().listen((_) {});
+    await cancelFailure.cancel();
+  }, (error, stackTrace) => cancelError.complete(error));
+  check((await cancelError.future as PlatformException).code == 'cancel',
+      'broadcast onCancel error must reach the zone');
+  checkEventKeepAlive(false);
+  check(_pigeonFfiAsyncReplies.isEmpty, 'requests leaked');
+  check(_pigeonFfiEventControllers.isEmpty, 'subscriptions leaked');
+  check(pigeon_ffi.NativeLibrary.allocated == pigeon_ffi.NativeLibrary.freed, 'buffers leaked');
+  print('All callback lifecycle checks passed.');
+}

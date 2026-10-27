@@ -1,8 +1,4 @@
-## 29.1.1
-
-* [cpp] Fixes C++ FFI options merging to use the renamed upstream map helper.
-
-## 29.1.0
+## NEXT
 
 * [cpp] Adds experimental C ABI FFI adapters for synchronous and asynchronous
   HostApi methods and event streams, with an optional synchronous dispatcher.
@@ -10,6 +6,13 @@
   ffigen configuration and binding generation.
 * [cpp] Adds `CppOptions.useStdVisit` for toolchains that cannot use `std::visit`
   with `flutter::EncodableValue`.
+* [cpp] Fixes C++ FFI options merging to use the renamed upstream map helper.
+* [cpp] Fixes enum arguments in C++ FFI adapters and isolates C ABI symbols across
+  generated files and packages. Regenerate the C++ adapters and ffigen bindings
+  together when upgrading.
+* [dart] Allows isolates to exit when C++ FFI requests and event subscriptions
+  finish, while retaining shared callbacks for reuse and queued notifications.
+* [cpp] Rejects incompatible API and FFI namespaces before generating code.
 * Requires separate Pigeon configurations and Dart outputs for C++ Dart FFI and
   Swift FFI/Kotlin JNI.
 
