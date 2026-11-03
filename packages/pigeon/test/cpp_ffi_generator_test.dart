@@ -268,6 +268,134 @@ void main() {
     expect(code, isNot(contains('TODO')));
   });
 
+  test('generates duplicate registration guard and teardown for HostApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'CalculatorApi',
+          methods: <Method>[
+            Method(
+              name: 'add',
+              parameters: <Parameter>[
+                Parameter(
+                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
+                  name: 'x',
+                ),
+              ],
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+
+    final headerSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.header,
+        languageOptions: const InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      headerSink,
+      dartPackageName: _packageName,
+    );
+    expect(headerSink.toString(), contains('void TearDownCalculatorApiFfi();'));
+
+    final sourceSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.source,
+        languageOptions: const InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      sourceSink,
+      dartPackageName: _packageName,
+    );
+    final code = sourceSink.toString();
+    expect(code, contains('if (g_calculator_api_api != nullptr) {'));
+    expect(code, contains('SetUpCalculatorApiFfi() called more than once.'));
+    expect(code, contains('void TearDownCalculatorApiFfi() {'));
+    expect(code, contains('g_calculator_api_api = nullptr;'));
+    expect(code, contains('g_calculator_api_dispatcher = nullptr;'));
+  });
+
+  test('generates duplicate registration guard and teardown for EventChannelApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstEventChannelApi(
+          name: 'EventApi',
+          methods: <Method>[
+            Method(
+              name: 'streamEvents',
+              parameters: <Parameter>[],
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+      containsEventChannel: true,
+    );
+
+    final headerSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.header,
+        languageOptions: const InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      headerSink,
+      dartPackageName: _packageName,
+    );
+    expect(headerSink.toString(), contains('void TearDownEventApiStreamEventsFfi();'));
+
+    final sourceSink = StringBuffer();
+    const CppFfiGenerator().generate(
+      OutputFileOptions<InternalCppFfiOptions>(
+        fileType: FileType.source,
+        languageOptions: const InternalCppFfiOptions(
+          headerIncludePath: 'messages_ffi.h',
+          apiHeaderIncludePath: 'messages.h',
+          cppFfiHeaderOut: 'messages_ffi.h',
+          cppFfiSourceOut: 'messages_ffi.cc',
+          namespace: 'test',
+        ),
+      ),
+      root,
+      sourceSink,
+      dartPackageName: _packageName,
+    );
+    final code = sourceSink.toString();
+    expect(code, contains('if (g_event_api_stream_events_handler != nullptr) {'));
+    expect(code, contains('SetUpEventApiStreamEventsFfi() called more than once.'));
+    expect(code, contains('void TearDownEventApiStreamEventsFfi() {'));
+    expect(code, contains('g_event_api_stream_events_handler = nullptr;'));
+    expect(code, contains('g_event_api_stream_events_dispatcher = nullptr;'));
+  });
+
   test('generates C ABI adapter for async HostApi', () {
     final root = Root(
       apis: <Api>[

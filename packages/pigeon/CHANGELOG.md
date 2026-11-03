@@ -1,5 +1,7 @@
 ## NEXT
 
+* [cpp] Adds duplicate-registration warnings and `TearDown...Ffi` functions to
+  the C++ FFI adapters, and documents the single-engine-per-process limitation.
 * [cpp] Adds experimental C ABI FFI adapters for synchronous and asynchronous
   HostApi methods and event streams, with an optional synchronous dispatcher.
 * [dart] Adds C++ FFI wrappers, configurable native library loading, and automatic

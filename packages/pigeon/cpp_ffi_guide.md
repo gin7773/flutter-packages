@@ -292,6 +292,24 @@ The shared Dart callbacks keep an isolate alive only while async requests or
 event subscriptions are active. They remain available for reuse and for native
 notifications already queued when a subscription is canceled.
 
+## Limitations
+
+Pigeon C++ FFI registration is process-global: each generated `SetUp...Ffi`
+function stores the implementation and dispatcher pointers in file-scope
+variables shared by the whole process, and the exported dispatch functions do
+not carry any engine identifier. Only one Flutter engine per process is
+supported. If a second engine registers the same API, the previous
+registration is overwritten and a warning is printed to `stderr`; calls from
+the previously registered engine are then routed to the most recently
+registered implementation.
+
+Call the generated `TearDown...Ffi` function when the owning plugin or engine
+is destroyed. It clears the registered pointers so that later calls fail with
+a clear "has not been set up" error instead of using a dangling pointer.
+
+Multi-engine support (per-engine registration handles passed on every FFI
+call) is tracked as a TODO in `lib/src/cpp/cpp_ffi_generator.dart`.
+
 ## FFI Event Streams
 
 When Dart FFI is enabled, `@EventChannelApi` methods generate FFI-backed Dart

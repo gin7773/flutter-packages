@@ -269,6 +269,7 @@ class PigeonFfiSyncDispatcher {
         indent.writeln('${api.name}* api,');
         indent.writeln('PigeonFfiSyncDispatcher* dispatcher = nullptr);');
       });
+      indent.writeln('void TearDown${api.name}Ffi();');
     }
     for (final api in eventChannelApis) {
       for (final Method method in api.methods) {
@@ -337,12 +338,14 @@ void _writeEventChannelSetUpDeclaration(Indent indent, AstEventChannelApi api, M
     indent.writeln('$handlerName* handler,');
     indent.writeln('PigeonFfiSyncDispatcher* dispatcher = nullptr);');
   });
+  indent.writeln('void TearDown${api.name}${_methodName(method)}Ffi();');
 }
 
 void _writeSource(InternalCppFfiOptions options, Root root, Indent indent, String symbolPrefix) {
   indent.writeln('#include "${options.headerIncludePath}"');
   indent.newln();
   indent.writeln('#include <any>');
+  indent.writeln('#include <cstdio>');
   indent.writeln('#include <cstring>');
   indent.writeln('#include <memory>');
   indent.writeln('#include <string>');
@@ -499,6 +502,12 @@ void ${symbolPrefix}free_buffer(PigeonFfiBuffer* buffer) {
   }
 }
 
+// TODO(pigeon): Support multiple Flutter engines per process. Registration
+// state below is process-global; a second engine silently overwrites the
+// first engine's registration. Redesign: return an opaque handle from
+// SetUp*Ffi, store registrations in a handle-keyed registry, and pass the
+// handle as the first argument to every FFI dispatch call (requires matching
+// Dart-side binding changes and an engine/isolate bootstrap handshake).
 void _writeApiSource(Indent indent, AstHostApi api) {
   indent.newln();
   indent.writeln('namespace {');
@@ -514,8 +523,20 @@ void _writeApiSource(Indent indent, AstHostApi api) {
     indent.writeln('PigeonFfiSyncDispatcher* dispatcher) {');
   });
   indent.nest(1, () {
+    indent.writeScoped('if (${_apiVariable(api)} != nullptr) {', '}', () {
+      indent.writeln(
+        'std::fprintf(stderr, "[pigeon] SetUp${api.name}Ffi() called more than once. Pigeon C++ FFI registration is process-global and supports only one Flutter engine per process; calls from previously registered engines will be routed to the most recently registered implementation.\\n");',
+      );
+    });
     indent.writeln('${_apiVariable(api)} = api;');
     indent.writeln('${_dispatcherVariable(api)} = dispatcher;');
+  });
+  indent.writeln('}');
+  indent.newln();
+  indent.writeln('void TearDown${api.name}Ffi() {');
+  indent.nest(1, () {
+    indent.writeln('${_apiVariable(api)} = nullptr;');
+    indent.writeln('${_dispatcherVariable(api)} = nullptr;');
   });
   indent.writeln('}');
   indent.newln();
@@ -604,8 +625,20 @@ void _writeEventChannelMethodSource(Indent indent, AstEventChannelApi api, Metho
     indent.writeln('PigeonFfiSyncDispatcher* dispatcher) {');
   });
   indent.nest(1, () {
+    indent.writeScoped('if ($handlerVariable != nullptr) {', '}', () {
+      indent.writeln(
+        'std::fprintf(stderr, "[pigeon] SetUp${api.name}${_methodName(method)}Ffi() called more than once. Pigeon C++ FFI registration is process-global and supports only one Flutter engine per process; events from previously registered engines will be delivered to the most recently registered handler.\\n");',
+      );
+    });
     indent.writeln('$handlerVariable = handler;');
     indent.writeln('$dispatcherVariable = dispatcher;');
+  });
+  indent.writeln('}');
+  indent.newln();
+  indent.writeln('void TearDown${api.name}${_methodName(method)}Ffi() {');
+  indent.nest(1, () {
+    indent.writeln('$handlerVariable = nullptr;');
+    indent.writeln('$dispatcherVariable = nullptr;');
   });
   indent.writeln('}');
   indent.newln();
