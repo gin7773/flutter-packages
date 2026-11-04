@@ -1095,7 +1095,7 @@ class CppSourceGenerator extends StructuredGenerator<InternalCppOptions> {
             });
           } else {
             if (field.type.isClass) {
-              indent.writeln('os << $name;');
+              indent.writeln('os << *$name;');
             } else {
               indent.writeln('os << PigeonInternalToString($name);');
             }
