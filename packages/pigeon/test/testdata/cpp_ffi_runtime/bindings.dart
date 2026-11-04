@@ -23,6 +23,9 @@ typedef DoneCallback = ffi.Void Function(ffi.Int64);
 class NativeLibrary {
   NativeLibrary(ffi.DynamicLibrary _);
 
+  NativeLibrary.fromLookup(ffi.Pointer<T> Function<T extends ffi.NativeType>(String) lookup)
+    : this(ffi.DynamicLibrary.process());
+
   static int allocated = 0;
   static int freed = 0;
   static Completer<void>? drained;

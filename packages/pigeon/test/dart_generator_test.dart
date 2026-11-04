@@ -159,7 +159,7 @@ void main() {
     expect(code, contains("Stream<int> streamEvents({String instanceName = ''}"));
     expect(code, contains('StreamController<int>.broadcast'));
     expect(code, contains('NativeCallable<_PigeonFfiEventCallbackNative>'));
-    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
     expect(code, contains('pigeon_event_api_stream_events_listen'));
     expect(code, contains('pigeon_event_api_stream_events_cancel'));
     expect(code, contains('_pigeonFfiOnEventCallback.nativeFunction'));
@@ -243,7 +243,7 @@ void main() {
     expect(code, contains('Future<Output> doSomething(Input input) async'));
     expect(code, contains('final Completer<Output> pigeonVar_completer = Completer<Output>();'));
     expect(code, contains('_pigeonFfiAsyncReplies[pigeonVar_replyId] = _PigeonFfiAsyncReply('));
-    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
     expect(code, contains('pigeonVar_ffiBindings.pigeon_api_do_something('));
     expect(code, contains('_pigeonFfiReplyCallback.nativeFunction'));
     expect(code, contains('return await pigeonVar_completer.future;'));
@@ -365,12 +365,54 @@ void main() {
     expect(code, isNot(contains('ffi_bridge')));
     expect(code, isNot(contains('jni_bridge')));
     expect(code, isNot(contains('createWithNativeInteropApi')));
-    expect(code, contains('pigeon_ffi.MessagesFfiBindings(openLibrary())'));
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
     expect(code, contains('final ByteData? pigeonVar_requestMessage ='));
     expect(code, contains('<Object?>[x, y]'));
     expect(code, contains('pigeonVar_ffiBindings.pigeon_api_add(pigeonVar_request)'));
     expect(code, contains('pigeonVar_ffiBindings.pigeon_free_buffer(pigeonVar_response)'));
     expect(code, isNot(contains('BasicMessageChannel<Object?>')));
+  });
+
+  test('FFI bindings open the native library lazily', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'Api',
+          methods: <Method>[
+            Method(
+              name: 'doSomething',
+              location: ApiLocation.host,
+              parameters: <Parameter>[],
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+    final sink = StringBuffer();
+    const generator = DartGenerator();
+    generator.generate(
+      const InternalDartOptions(
+        ffiOptions: InternalDartFfiOptions(
+          bindingImportPath: 'messages.g.ffi.dart',
+          bindingClassName: 'MessagesFfiBindings',
+          nativeLibraryExpression: 'openLibrary()',
+        ),
+        ignoreLints: false,
+      ),
+      root,
+      sink,
+      dartPackageName: DEFAULT_PACKAGE_NAME,
+    );
+    final code = sink.toString();
+    expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
+    expect(code, isNot(contains('pigeon_ffi.MessagesFfiBindings(openLibrary())')));
+    expect(code, contains('late final ffi.DynamicLibrary _pigeonNativeLibrary'));
+    expect(code, contains('return _pigeonNativeLibrary.lookup<T>(symbolName);'));
+    expect(code, contains('return openLibrary();'));
+    expect(code, contains('Pigeon FFI: failed to open the native library'));
   });
 
   test('host multiple args', () {

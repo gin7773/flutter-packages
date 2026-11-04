@@ -2247,7 +2247,7 @@ ${api.name}({
 }
 
 static final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
-\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
+\t\t$_pigeonFfiPrefix.${options.bindingClassName}.fromLookup(_pigeonFfiLookup);
 
 final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
 ''');
@@ -3433,10 +3433,29 @@ List<Object?>? _decodeFfiReply(
 \treturn codec.decodeMessage(ByteData.sublistView(bytes)) as List<Object?>?;
 }
 ''');
+    indent.format('''
+ffi.DynamicLibrary _openPigeonNativeLibrary() {
+\ttry {
+\t\treturn ${options.nativeLibraryExpression};
+\t} catch (error) {
+\t\tthrow StateError(
+\t\t\t\t'Pigeon FFI: failed to open the native library. The plugin shared '
+\t\t\t\t'library may not be loaded yet. Avoid constructing FFI bindings '
+\t\t\t\t'during plugin registration; construct them lazily on first use. '
+\t\t\t\t'Original error: \$error');
+\t}
+}
+
+late final ffi.DynamicLibrary _pigeonNativeLibrary = _openPigeonNativeLibrary();
+
+ffi.Pointer<T> _pigeonFfiLookup<T extends ffi.NativeType>(String symbolName) {
+\treturn _pigeonNativeLibrary.lookup<T>(symbolName);
+}
+''');
     if (includeAsyncHostUtilities || includeEventChannelUtilities) {
       indent.format('''
 final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBindings =
-\t\t$_pigeonFfiPrefix.${options.bindingClassName}(${options.nativeLibraryExpression});
+\t\t$_pigeonFfiPrefix.${options.bindingClassName}.fromLookup(_pigeonFfiLookup);
 ''');
     }
     if (includeAsyncHostUtilities) {
