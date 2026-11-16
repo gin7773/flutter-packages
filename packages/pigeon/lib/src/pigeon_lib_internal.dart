@@ -715,6 +715,18 @@ class DartGeneratorAdapter implements GeneratorAdapter {
         ),
       );
     }
+    if (cppFfiOptions != null) {
+      for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
+        if (api.methods.any((Method method) => method.name == 'pigeonDispose')) {
+          errors.add(
+            Error(
+              message:
+                  'C++ FFI reserves HostApi method name "pigeonDispose" for session cleanup (in API "${api.name}"). Rename the method.',
+            ),
+          );
+        }
+      }
+    }
     if (usesNativeInterop(dartOptions)) {
       errors.addAll(_errorOnNativeInteropReservedMethodNames(root, useJni: dartOptions.useJni));
     }
@@ -1080,7 +1092,9 @@ class CppFfiGeneratorAdapter implements GeneratorAdapter {
     if (options.cppFfiOptions == null) {
       return <Error>[];
     }
-    return validateCppFfi(options.cppFfiOptions!, root);
+    final List<Error> errors = validateCppFfi(options.cppFfiOptions!, root);
+    _errorOnTaskQueueInNativeInterop(errors, languageString, root);
+    return errors;
   }
 }
 

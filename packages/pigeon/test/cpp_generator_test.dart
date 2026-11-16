@@ -26,6 +26,53 @@ final Enum emptyEnum = Enum(
 );
 
 void main() {
+  for (final asynchronous in <bool>[false, true]) {
+    test('nullable int arguments accept both codec integer widths (async: $asynchronous)', () {
+      final root = Root(
+        apis: <Api>[
+          AstHostApi(
+            name: 'Api',
+            methods: <Method>[
+              Method(
+                name: 'accept',
+                location: ApiLocation.host,
+                isAsynchronous: asynchronous,
+                returnType: const TypeDeclaration.voidDeclaration(),
+                parameters: <Parameter>[
+                  Parameter(
+                    name: 'value',
+                    type: const TypeDeclaration(baseName: 'int', isNullable: true),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+        classes: <Class>[],
+        enums: <Enum>[],
+        containsHostApi: true,
+      );
+      final sink = StringBuffer();
+      const CppGenerator().generate(
+        OutputFileOptions<InternalCppOptions>(
+          fileType: FileType.source,
+          languageOptions: const InternalCppOptions(
+            cppHeaderOut: 'messages.h',
+            cppSourceOut: 'messages.cc',
+            headerIncludePath: 'messages.h',
+          ),
+        ),
+        root,
+        sink,
+        dartPackageName: DEFAULT_PACKAGE_NAME,
+      );
+      final code = sink.toString();
+      expect(code, contains('encodable_value_arg.LongValue()'));
+      expect(code, contains('encodable_value_arg.IsNull() ? nullptr : &value_arg_value'));
+      expect(code, isNot(contains('std::get_if<int64_t>(&encodable_value_arg)')));
+    });
+  }
+
   test('gen one api', () {
     final root = Root(
       apis: <Api>[
@@ -1282,7 +1329,9 @@ void main() {
       expect(code, contains('const auto* a_bool_arg = std::get_if<bool>(&encodable_a_bool_arg);'));
       expect(
         code,
-        contains('const auto* an_int_arg = std::get_if<int64_t>(&encodable_an_int_arg);'),
+        contains(
+          'const int64_t* an_int_arg = encodable_an_int_arg.IsNull() ? nullptr : &an_int_arg_value;',
+        ),
       );
       // Custom class types require an extra layer of extraction.
       expect(

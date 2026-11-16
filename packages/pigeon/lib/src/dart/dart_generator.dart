@@ -2237,12 +2237,10 @@ ${api.name}({
 \tBinaryMessenger? binaryMessenger,
 \tString messageChannelSuffix = '',
 \t$_pigeonFfiPrefix.${options.bindingClassName}? ffiBindings,
-}) : $_pigeonFfiBindings = ffiBindings ?? $_defaultPigeonFfiBindings {
+}) : $_pigeonFfiBindings = ffiBindings ?? $_defaultPigeonFfiBindings,
+     _pigeonFfiInstanceName = messageChannelSuffix {
 \tif (binaryMessenger != null) {
 \t\tthrow ArgumentError.value(binaryMessenger, 'binaryMessenger', 'BinaryMessenger is not supported by FFI HostApi.');
-\t}
-\tif (messageChannelSuffix.isNotEmpty) {
-\t\tthrow ArgumentError.value(messageChannelSuffix, 'messageChannelSuffix', 'messageChannelSuffix is not supported by FFI HostApi.');
 \t}
 }
 
@@ -2250,6 +2248,28 @@ static final $_pigeonFfiPrefix.${options.bindingClassName} $_defaultPigeonFfiBin
 \t\t$_pigeonFfiPrefix.${options.bindingClassName}.fromLookup(_pigeonFfiLookup);
 
 final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
+final String _pigeonFfiInstanceName;
+int? _pigeonFfiSession;
+bool _pigeonFfiDisposed = false;
+
+int _pigeonGetFfiSession() {
+  if (_pigeonFfiDisposed) throw StateError('This FFI API has been disposed.');
+  return _pigeonFfiSession ??= _connectFfiSession(
+      $_pigeonFfiBindings, $pigeonChannelCodec, _pigeonFfiInstanceName,
+      $_pigeonFfiBindings.pigeon_${makeCppFfiMemberName('session', api.name)}_connect);
+}
+
+/// Disconnects this API before its isolate is shut down.
+void pigeonDispose() {
+  if (_pigeonFfiDisposed) return;
+  final int? session = _pigeonFfiSession;
+  if (session != null) {
+    _disconnectFfiSession($_pigeonFfiBindings, $pigeonChannelCodec, session,
+        $_pigeonFfiBindings.pigeon_${makeCppFfiMemberName('session', api.name)}_disconnect);
+  }
+  _pigeonFfiDisposed = true;
+  ${api.methods.any((Method m) => m.isAsynchronous || m.isAsynchronousCallback) ? '_disposePigeonFfiReplies(this);' : ''}
+}
 ''');
 
       indent.writeln(
@@ -2336,15 +2356,18 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     final String streamType = addGenericTypes(method.returnType);
     final String listenFunctionName = _eventListenFunctionName(api, method);
     final String cancelFunctionName = _eventCancelFunctionName(api, method);
-    indent.writeln("Stream<$streamType> ${method.name}({String instanceName = ''}) {");
+    indent.writeln(
+      "Stream<$streamType> ${method.name}({String instanceName = '', String messageChannelSuffix = ''}) {",
+    );
     indent.nest(1, () {
       indent.writeln('const MessageCodec<Object?> ${varNamePrefix}codec = $_pigeonMessageCodec();');
       indent.writeln('int? ${varNamePrefix}activeSinkId;');
+      indent.writeln('int? ${varNamePrefix}sessionId;');
       indent.writeln('late final StreamController<$streamType> ${varNamePrefix}controller;');
       indent.writeln('${varNamePrefix}controller = StreamController<$streamType>.broadcast(');
       indent.nest(1, () {
-        _writeFfiEventOnListen(indent, method, listenFunctionName, streamType);
-        _writeFfiEventOnCancel(indent, cancelFunctionName);
+        _writeFfiEventOnListen(indent, api, method, listenFunctionName, streamType);
+        _writeFfiEventOnCancel(indent, api, method, cancelFunctionName);
       });
       indent.writeln(');');
       indent.writeln('return ${varNamePrefix}controller.stream;');
@@ -2355,6 +2378,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
 
   void _writeFfiEventOnListen(
     Indent indent,
+    AstEventChannelApi api,
     Method method,
     String listenFunctionName,
     String streamType,
@@ -2390,10 +2414,14 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       indent.nest(1, () {
         indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
         indent.writeln(
+          '${varNamePrefix}sessionId = _connectFfiSession($_defaultPigeonFfiBindings, ${varNamePrefix}codec, messageChannelSuffix, $_defaultPigeonFfiBindings.pigeon_${makeCppFfiMemberName('event_session', api.name, method.name)}_connect);',
+        );
+        indent.writeln(
           '${varNamePrefix}response = '
           '$_defaultPigeonFfiBindings.$listenFunctionName(',
         );
         indent.nest(1, () {
+          indent.writeln('${varNamePrefix}sessionId!,');
           indent.writeln('${varNamePrefix}request,');
           indent.writeln('${varNamePrefix}sinkId,');
           indent.writeln('_pigeonFfiOnEventCallback.nativeFunction,');
@@ -2415,6 +2443,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       });
       indent.writeln('} catch (error, stackTrace) {');
       indent.nest(1, () {
+        _writeFfiEventDisconnect(indent, api, method, reportError: true);
         indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
         indent.writeln('${varNamePrefix}activeSinkId = null;');
         indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
@@ -2433,7 +2462,12 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
     });
   }
 
-  void _writeFfiEventOnCancel(Indent indent, String cancelFunctionName) {
+  void _writeFfiEventOnCancel(
+    Indent indent,
+    AstEventChannelApi api,
+    Method method,
+    String cancelFunctionName,
+  ) {
     const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     indent.writeScoped('onCancel: () {', '},', () {
       indent.writeln('final int? ${varNamePrefix}sinkId = ${varNamePrefix}activeSinkId;');
@@ -2455,7 +2489,7 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
         indent.writeln(
           '${varNamePrefix}response = '
           '$_defaultPigeonFfiBindings.$cancelFunctionName('
-          '${varNamePrefix}request, ${varNamePrefix}sinkId);',
+          '${varNamePrefix}sessionId!, ${varNamePrefix}request, ${varNamePrefix}sinkId);',
         );
         indent.writeln(
           'final List<Object?>? ${varNamePrefix}replyList = '
@@ -2471,15 +2505,50 @@ final $_pigeonFfiPrefix.${options.bindingClassName} $_pigeonFfiBindings;
       });
       indent.writeln('} finally {');
       indent.nest(1, () {
-        indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
-        indent.writeln('${varNamePrefix}activeSinkId = null;');
-        indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
-        indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
-        indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
-          indent.writeln(
-            '$_defaultPigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);',
-          );
+        indent.writeln('try {');
+        indent.nest(1, () {
+          _writeFfiEventDisconnect(indent, api, method);
         });
+        indent.writeln('} finally {');
+        indent.nest(1, () {
+          indent.writeln('_pigeonFfiEventControllers.remove(${varNamePrefix}sinkId);');
+          indent.writeln('${varNamePrefix}activeSinkId = null;');
+          indent.writeln('_updatePigeonFfiEventCallbackKeepAlive();');
+          indent.writeln('_freeFfiRequest(${varNamePrefix}request);');
+          indent.writeScoped('if (${varNamePrefix}response != ffi.nullptr) {', '}', () {
+            indent.writeln(
+              '$_defaultPigeonFfiBindings.pigeon_free_buffer(${varNamePrefix}response);',
+            );
+          });
+        });
+        indent.writeln('}');
+      });
+      indent.writeln('}');
+    });
+  }
+
+  void _writeFfiEventDisconnect(
+    Indent indent,
+    AstEventChannelApi api,
+    Method method, {
+    bool reportError = false,
+  }) {
+    indent.writeScoped('if (${varNamePrefix}sessionId != null) {', '}', () {
+      indent.writeln('try {');
+      indent.nest(1, () {
+        indent.writeln(
+          '_disconnectFfiSession($_defaultPigeonFfiBindings, ${varNamePrefix}codec, ${varNamePrefix}sessionId!, $_defaultPigeonFfiBindings.pigeon_${makeCppFfiMemberName('event_session', api.name, method.name)}_disconnect);',
+        );
+      });
+      if (reportError) {
+        indent.writeln('} catch (cleanupError, cleanupStack) {');
+        indent.nest(1, () {
+          indent.writeln('${varNamePrefix}controller.addError(cleanupError, cleanupStack);');
+        });
+      }
+      indent.writeln('} finally {');
+      indent.nest(1, () {
+        indent.writeln('${varNamePrefix}sessionId = null;');
       });
       indent.writeln('}');
     });
@@ -3434,6 +3503,37 @@ List<Object?>? _decodeFfiReply(
 }
 ''');
     indent.format('''
+int _connectFfiSession(
+    $_pigeonFfiPrefix.${options.bindingClassName} bindings,
+    MessageCodec<Object?> codec,
+    String name,
+    ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> Function(ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>) connect) {
+  final request = _encodeFfiRequest(codec.encodeMessage(<Object?>[name]));
+  ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> reply = ffi.nullptr;
+  try {
+    reply = connect(request);
+    return _extractReplyValueOrThrow(_decodeFfiReply(codec, reply),
+        'FFI connect', isNullValid: false) as int;
+  } finally {
+    _freeFfiRequest(request);
+    if (reply != ffi.nullptr) bindings.pigeon_free_buffer(reply);
+  }
+}
+
+void _disconnectFfiSession(
+    $_pigeonFfiPrefix.${options.bindingClassName} bindings,
+    MessageCodec<Object?> codec,
+    int session,
+    ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer> Function(int) disconnect) {
+  final reply = disconnect(session);
+  try {
+    _extractReplyValueOrThrow(_decodeFfiReply(codec, reply),
+        'FFI disconnect', isNullValid: true);
+  } finally {
+    if (reply != ffi.nullptr) bindings.pigeon_free_buffer(reply);
+  }
+}
+
 ffi.DynamicLibrary _openPigeonNativeLibrary() {
 \ttry {
 \t\treturn ${options.nativeLibraryExpression};
@@ -3467,6 +3567,7 @@ typedef _PigeonFfiReplyCallbackNative = ffi.Void Function(
 
 class _PigeonFfiAsyncReply {
 \t_PigeonFfiAsyncReply({
+\t\trequired this.owner,
 \t\trequired this.ffiBindings,
 \t\trequired this.codec,
 \t\trequired this.channelName,
@@ -3475,6 +3576,7 @@ class _PigeonFfiAsyncReply {
 \t\trequired this.completeError,
 \t});
 
+\tfinal Object owner;
 \tfinal $_pigeonFfiPrefix.${options.bindingClassName} ffiBindings;
 \tfinal MessageCodec<Object?> codec;
 \tfinal String channelName;
@@ -3494,6 +3596,17 @@ final ffi.NativeCallable<_PigeonFfiReplyCallbackNative> _pigeonFfiReplyCallback 
 // Cache the callback for reuse; only unfinished requests keep the isolate alive.
 void _updatePigeonFfiReplyCallbackKeepAlive() {
 \t_pigeonFfiReplyCallback.keepIsolateAlive = _pigeonFfiAsyncReplies.isNotEmpty;
+}
+
+void _disposePigeonFfiReplies(Object owner) {
+  final ids = _pigeonFfiAsyncReplies.entries
+      .where((entry) => identical(entry.value.owner, owner))
+      .map((entry) => entry.key).toList();
+  for (final id in ids) {
+    _pigeonFfiAsyncReplies.remove(id)!.completeError(
+        StateError('FFI API disposed before the request completed.'), StackTrace.current);
+  }
+  _updatePigeonFfiReplyCallbackKeepAlive();
 }
 
 void _handlePigeonFfiReply(
@@ -3881,6 +3994,7 @@ if (wrapped == null) {
       _writeFfiAsyncHostMethodCall(indent, api: api, method: method);
       return;
     }
+    indent.writeln('final int ${varNamePrefix}sessionId = _pigeonGetFfiSession();');
     const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     if (method.parameters.isEmpty) {
       indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
@@ -3909,7 +4023,7 @@ if (wrapped == null) {
     indent.nest(1, () {
       indent.writeln(
         '${varNamePrefix}response = '
-        '$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(${varNamePrefix}request);',
+        '$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(${varNamePrefix}sessionId, ${varNamePrefix}request);',
       );
       indent.writeln(
         'final List<Object?>? ${varNamePrefix}replyList = '
@@ -3946,6 +4060,7 @@ _extractReplyValueOrThrow(
     required AstHostApi api,
     required Method method,
   }) {
+    indent.writeln('final int ${varNamePrefix}sessionId = _pigeonGetFfiSession();');
     const requestType = 'ffi.Pointer<$_pigeonFfiPrefix.PigeonFfiBuffer>';
     if (method.parameters.isEmpty) {
       indent.writeln('final $requestType ${varNamePrefix}request = ffi.nullptr;');
@@ -3979,6 +4094,7 @@ _extractReplyValueOrThrow(
       ');',
       () {
         indent.writeln('ffiBindings: $_pigeonFfiBindings,');
+        indent.writeln('owner: this,');
         indent.writeln('codec: $pigeonChannelCodec,');
         indent.writeln('channelName: ${varNamePrefix}channelName,');
         indent.writeln('isNullValid: ${method.returnType.isNullable || method.returnType.isVoid},');
@@ -4004,6 +4120,7 @@ _extractReplyValueOrThrow(
       indent.writeln('_updatePigeonFfiReplyCallbackKeepAlive();');
       indent.writeln('$_pigeonFfiBindings.${_ffiFunctionName(api, method)}(');
       indent.nest(1, () {
+        indent.writeln('${varNamePrefix}sessionId,');
         indent.writeln('${varNamePrefix}request,');
         indent.writeln('${varNamePrefix}replyId,');
         indent.writeln('_pigeonFfiReplyCallback.nativeFunction,');
@@ -4707,28 +4824,21 @@ String addGenericTypes(TypeDeclaration type, {bool useJni = false, bool useFfi =
 }
 
 String _ffiFunctionName(AstHostApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}';
+  return 'pigeon_${makeCppFfiMemberName('host', api.name, method.name)}';
 }
 
 String _eventListenFunctionName(AstEventChannelApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_listen';
+  return 'pigeon_${makeCppFfiMemberName('event', api.name, method.name)}_listen';
 }
 
 String _eventCancelFunctionName(AstEventChannelApi api, Method method) {
-  return 'pigeon_${_snakeCase(api.name)}_${_snakeCase(method.name)}_cancel';
+  return 'pigeon_${makeCppFfiMemberName('event', api.name, method.name)}_cancel';
 }
 
 bool _containsAsyncHostApi(Root root) {
   return root.apis.whereType<AstHostApi>().any(
     (AstHostApi api) =>
         api.methods.any((Method method) => method.isAsynchronous || method.isAsynchronousCallback),
-  );
-}
-
-String _snakeCase(String name) {
-  return name.replaceAllMapped(
-    RegExp(r'[A-Z]'),
-    (Match match) => '${match.start == 0 ? '' : '_'}${match[0]!.toLowerCase()}',
   );
 }
 

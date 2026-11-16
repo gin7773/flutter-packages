@@ -48,6 +48,23 @@ final Class emptyClass = Class(
 );
 
 void main() {
+  test('C++ FFI members preserve API boundaries, case, and runtime kinds', () {
+    final names = <String>{
+      makeCppFfiMemberName('host', 'FooBar', 'baz'),
+      makeCppFfiMemberName('host', 'Foo', 'barBaz'),
+      makeCppFfiMemberName('host', 'Foo_Bar', 'baz'),
+      makeCppFfiMemberName('host', 'Foo', 'bar_baz'),
+      makeCppFfiMemberName('host', 'foo', 'barBaz'),
+      makeCppFfiMemberName('host', 'Foo', 'freeBuffer'),
+      makeCppFfiMemberName('session', 'Foo', 'barBaz'),
+      makeCppFfiMemberName('event', 'Foo', 'barBaz'),
+      makeCppFfiMemberName('event_session', 'Foo', 'barBaz'),
+    };
+    expect(names, hasLength(9));
+    expect(names.every(RegExp(r'^[a-zA-Z_][a-zA-Z0-9_]*$').hasMatch), isTrue);
+    expect(names, isNot(contains('free_buffer')));
+  });
+
   test('C++ FFI symbol prefixes isolate packages and header paths', () {
     final prefixes = <String>{
       for (final (String packageName, String header) in <(String, String)>[

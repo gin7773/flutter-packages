@@ -1,9 +1,23 @@
-## NEXT
+## 29.1.0
 
-* [cpp] Adds duplicate-registration warnings and `TearDown...Ffi` functions to
-  the C++ FFI adapters, and documents the single-engine-per-process limitation.
+* [cpp] Supports multiple engines with named C++ FFI registrations and isolated
+  sessions. Rejects duplicate registration names and adds teardown that closes
+  sessions and stops event streams.
+* [dart] Supports C++ FFI `messageChannelSuffix` routing and `pigeonDispose()` to
+  disconnect a HostApi wrapper and fail its pending requests before isolate
+  shutdown. Event subscriptions disconnect on cancellation.
+* [cpp] Changes the experimental C ABI names and signatures for session routing
+  and collision-free exports. Regenerate all C++ adapters, Dart wrappers, and
+  ffigen bindings together.
+* [cpp] Fixes nullable integer arguments and exception handling at the C++ FFI
+  boundary.
+* [cpp] Removes the generated synchronous dispatcher. C++ FFI calls run on the
+  caller's thread; implementations handle thread scheduling for async methods.
+  Setup functions take an API and an optional instance name. Rejects background
+  TaskQueue annotations for C++ FFI.
+* [cpp] Reduces allocation overhead in FFI lifecycle guards.
 * [cpp] Adds experimental C ABI FFI adapters for synchronous and asynchronous
-  HostApi methods and event streams, with an optional synchronous dispatcher.
+  HostApi methods and event streams.
 * [dart] Adds C++ FFI wrappers, configurable native library loading, and automatic
   ffigen configuration and binding generation.
 * [cpp] Adds `CppOptions.useStdVisit` for toolchains that cannot use `std::visit`

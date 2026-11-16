@@ -156,12 +156,23 @@ void main() {
     final code = sink.toString();
     expect(code, contains("import 'dart:ffi' as ffi;"));
     expect(code, contains("import 'messages.g.ffi.dart' as pigeon_ffi;"));
-    expect(code, contains("Stream<int> streamEvents({String instanceName = ''}"));
+    expect(
+      code,
+      contains(
+        "Stream<int> streamEvents({String instanceName = '', String messageChannelSuffix = ''}",
+      ),
+    );
     expect(code, contains('StreamController<int>.broadcast'));
     expect(code, contains('NativeCallable<_PigeonFfiEventCallbackNative>'));
     expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
-    expect(code, contains('pigeon_event_api_stream_events_listen'));
-    expect(code, contains('pigeon_event_api_stream_events_cancel'));
+    expect(
+      code,
+      contains("pigeon_${makeCppFfiMemberName('event', 'EventApi', 'streamEvents')}_listen"),
+    );
+    expect(
+      code,
+      contains("pigeon_${makeCppFfiMemberName('event', 'EventApi', 'streamEvents')}_cancel"),
+    );
     expect(code, contains('_pigeonFfiOnEventCallback.nativeFunction'));
     expect(code, contains('_pigeonFfiOnErrorCallback.nativeFunction'));
     expect(code, contains('_pigeonFfiOnDoneCallback.nativeFunction'));
@@ -244,7 +255,12 @@ void main() {
     expect(code, contains('final Completer<Output> pigeonVar_completer = Completer<Output>();'));
     expect(code, contains('_pigeonFfiAsyncReplies[pigeonVar_replyId] = _PigeonFfiAsyncReply('));
     expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
-    expect(code, contains('pigeonVar_ffiBindings.pigeon_api_do_something('));
+    expect(
+      code,
+      contains(
+        "pigeonVar_ffiBindings.pigeon_${makeCppFfiMemberName('host', 'Api', 'doSomething')}(",
+      ),
+    );
     expect(code, contains('_pigeonFfiReplyCallback.nativeFunction'));
     expect(code, contains('return await pigeonVar_completer.future;'));
   });
@@ -368,7 +384,12 @@ void main() {
     expect(code, contains('pigeon_ffi.MessagesFfiBindings.fromLookup(_pigeonFfiLookup)'));
     expect(code, contains('final ByteData? pigeonVar_requestMessage ='));
     expect(code, contains('<Object?>[x, y]'));
-    expect(code, contains('pigeonVar_ffiBindings.pigeon_api_add(pigeonVar_request)'));
+    expect(
+      code,
+      contains(
+        "pigeonVar_ffiBindings.pigeon_${makeCppFfiMemberName('host', 'Api', 'add')}(pigeonVar_sessionId, pigeonVar_request)",
+      ),
+    );
     expect(code, contains('pigeonVar_ffiBindings.pigeon_free_buffer(pigeonVar_response)'));
     expect(code, isNot(contains('BasicMessageChannel<Object?>')));
   });

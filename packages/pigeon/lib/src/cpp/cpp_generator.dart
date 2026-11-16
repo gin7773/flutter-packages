@@ -2381,7 +2381,12 @@ ${prefix}reply(EncodableValue(std::move(wrapped)));''';
     if (hostType.isNullable) {
       // Nullable arguments are always pointers, with nullptr corresponding to
       // null.
-      if (hostType.datatype == 'EncodableValue') {
+      if (hostType.datatype == 'int64_t') {
+        indent.format('''
+const int64_t ${argName}_value = $encodableArgName.IsNull() ? 0 : $encodableArgName.LongValue();
+const int64_t* $argName = $encodableArgName.IsNull() ? nullptr : &${argName}_value;
+''');
+      } else if (hostType.datatype == 'EncodableValue') {
         // Generic objects just pass the EncodableValue through directly.
         indent.writeln('const auto* $argName = &$encodableArgName;');
       } else if (hostType.isBuiltin) {

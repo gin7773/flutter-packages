@@ -622,6 +622,48 @@ void main() {
     expect(errorsWithFfi, isEmpty);
   });
 
+  test('Dart reserves pigeonDispose only for C++ FFI HostApi', () {
+    final root = Root(
+      apis: <Api>[
+        AstHostApi(
+          name: 'Api',
+          methods: <Method>[
+            Method(
+              name: 'pigeonDispose',
+              location: ApiLocation.host,
+              returnType: const TypeDeclaration.voidDeclaration(),
+              parameters: <Parameter>[],
+            ),
+          ],
+        ),
+      ],
+      classes: <Class>[],
+      enums: <Enum>[],
+    );
+    const adapter = DartGeneratorAdapter();
+    for (final ffi in <bool>[false, true]) {
+      final List<Error> errors = adapter.validate(
+        InternalPigeonOptions.fromPigeonOptions(
+          PigeonOptions(
+            dartOut: 'messages.g.dart',
+            dartOptions: DartOptions(
+              ffiOptions: ffi
+                  ? const DartFfiOptions(bindingImportPath: 'messages.g.ffi.dart')
+                  : null,
+            ),
+          ),
+        ),
+        root,
+      );
+      if (ffi) {
+        expect(errors, hasLength(1));
+        expect(errors.single.message, contains('pigeonDispose'));
+      } else {
+        expect(errors, isEmpty);
+      }
+    }
+  });
+
   test('Dart FFI validation allows async HostApi', () {
     final root = Root(
       apis: <Api>[
@@ -2441,39 +2483,36 @@ abstract class EventApi {
       final String cppFfiSourceCode = cppFfiSourceFile.readAsStringSync();
       final String symbolPrefix = makeCppFfiSymbolPrefix('test_plugin', 'tizen/messages_ffi.h');
       final String ffigenConfigCode = ffigenConfigFile.readAsStringSync();
+      final String addName = makeCppFfiMemberName('host', 'Api', 'add');
+      final String initializeName = makeCppFfiMemberName('host', 'Api', 'initialize');
+      final String eventName = makeCppFfiMemberName('event', 'EventApi', 'streamEvents');
 
       expect(dartCode, contains('MessagesFfiBindings'));
       expect(dartCode, contains('Future<int> initialize'));
       expect(dartCode, contains('_pigeonFfiReplyCallback.nativeFunction'));
       expect(dartCode, contains('Stream<int> streamEvents'));
-      expect(dartCode, contains('pigeon_event_api_stream_events_listen'));
+      expect(dartCode, contains('pigeon_${eventName}_listen'));
       expect(dartFfiCode, contains('fake ffigen'));
       expect(cppHeaderCode, contains('class Api'));
       expect(cppHeaderCode, contains('namespace test_plugin {'));
       expect(cppSourceCode, contains('Api::GetCodec'));
       expect(cppFfiHeaderCode, contains('PigeonFfiBuffer'));
-      expect(cppFfiHeaderCode, contains('${symbolPrefix}api_add'));
-      expect(cppFfiHeaderCode, contains('PIGEON_FFI_EXPORT void ${symbolPrefix}api_initialize('));
-      expect(cppFfiHeaderCode, contains('${symbolPrefix}event_api_stream_events_listen'));
+      expect(cppFfiHeaderCode, contains('$symbolPrefix$addName'));
+      expect(cppFfiHeaderCode, contains('PIGEON_FFI_EXPORT void $symbolPrefix$initializeName('));
+      expect(cppFfiHeaderCode, contains('$symbolPrefix${eventName}_listen'));
       expect(cppFfiHeaderCode, contains('namespace test_plugin {'));
-      expect(cppFfiHeaderCode, contains('class PigeonFfiSyncDispatcher'));
+      expect(cppFfiHeaderCode, isNot(contains('PigeonFfiSyncDispatcher')));
       expect(cppFfiHeaderCode, contains('class PigeonEventApiStreamEventsStreamHandler'));
       expect(cppFfiSourceCode, contains('SetUpApiFfi'));
       expect(cppFfiSourceCode, contains('SetUpEventApiStreamEventsFfi'));
       expect(cppFfiSourceCode, contains('namespace test_plugin {'));
-      expect(cppFfiSourceCode, contains('PigeonFfiSyncDispatcher* g_api_dispatcher = nullptr;'));
+      expect(cppFfiSourceCode, isNot(contains('RunSync')));
+      expect(cppFfiSourceCode, contains('PigeonFfiLease session_lease'));
+      expect(cppFfiSourceCode, contains('test_plugin::Pigeon_$addName('));
+      expect(cppFfiSourceCode, contains('test_plugin::Pigeon_$initializeName('));
       expect(
         cppFfiSourceCode,
-        contains('PigeonFfiSyncDispatcher* g_event_api_stream_events_dispatcher = nullptr;'),
-      );
-      expect(cppFfiSourceCode, contains('return test_plugin::PigeonApiAddFfiDispatch(request);'));
-      expect(
-        cppFfiSourceCode,
-        contains('test_plugin::PigeonApiInitializeFfiDispatch(request, reply_id, on_reply);'),
-      );
-      expect(
-        cppFfiSourceCode,
-        contains('return test_plugin::PigeonEventApiStreamEventsListenFfiDispatch'),
+        contains('return test_plugin::PigeonEventApiStreamEventsListenFfi('),
       );
       expect(cppFfiSourceCode, isNot(contains('TakeValue()')));
       expect(ffigenConfigCode, contains("output: '../../lib/messages.g.ffi.dart'"));
@@ -3573,6 +3612,51 @@ dependency_overrides:
       expect(errors, hasLength(1));
       expect(errors[0].message, contains('Kotlin JNI does not support TaskQueue'));
     });
+
+    for (final event in <bool>[false, true]) {
+      for (final TaskQueueType queue in TaskQueueType.values) {
+        test('C++ FFI validates TaskQueue (event: $event, queue: $queue)', () {
+          final methods = <Method>[
+            Method(
+              name: 'foo',
+              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+              parameters: <Parameter>[],
+              taskQueueType: queue,
+              location: ApiLocation.host,
+            ),
+          ];
+          final root = Root(
+            apis: <Api>[
+              if (event)
+                AstEventChannelApi(name: 'Api', methods: methods)
+              else
+                AstHostApi(name: 'Api', methods: methods),
+            ],
+            classes: <Class>[],
+            enums: <Enum>[],
+          );
+          const adapter = CppFfiGeneratorAdapter();
+          final InternalPigeonOptions options = InternalPigeonOptions.fromPigeonOptions(
+            const PigeonOptions(
+              cppHeaderOut: 'messages.h',
+              cppFfiHeaderOut: 'messages_ffi.h',
+              cppFfiSourceOut: 'messages_ffi.cc',
+            ),
+          );
+          final List<Error> errors = adapter.validate(options, root);
+          if (queue == TaskQueueType.serial) {
+            expect(errors, isEmpty);
+          } else {
+            expect(errors, hasLength(1));
+            expect(errors.single.message, contains('C++ FFI does not support TaskQueue'));
+          }
+          expect(
+            adapter.validate(InternalPigeonOptions.fromPigeonOptions(const PigeonOptions()), root),
+            isEmpty,
+          );
+        });
+      }
+    }
 
     test('KotlinGeneratorAdapter errors on JNI property name collisions', () {
       final root = Root(

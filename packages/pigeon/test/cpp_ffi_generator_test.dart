@@ -2,8 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path/path.dart' as path;
 import 'package:pigeon/src/ast.dart';
 import 'package:pigeon/src/cpp/cpp_ffi_generator.dart';
+import 'package:pigeon/src/cpp/cpp_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/pigeon_lib.dart' show Error;
 import 'package:test/test.dart';
@@ -12,6 +18,71 @@ const String _packageName = 'test_package';
 final String _symbolPrefix = makeCppFfiSymbolPrefix(_packageName, 'messages_ffi.h');
 
 void main() {
+  final String? compiler = Platform.environment['PIGEON_TEST_CXX'];
+  final String? zig = Platform.environment['PIGEON_TEST_ZIG'];
+  final String? clientWrapper = Platform.environment['PIGEON_TEST_CPP_CLIENT_WRAPPER'];
+  final String? skipReason = (compiler == null && zig == null) || clientWrapper == null
+      ? 'Set PIGEON_TEST_CXX (clang++/g++) or PIGEON_TEST_ZIG, and '
+            'PIGEON_TEST_CPP_CLIENT_WRAPPER. See cpp_ffi_guide.md#native-regression-tests.'
+      : null;
+
+  test(
+    'generated C++ FFI preserves session, callback and codec lifetimes',
+    () async {
+      final wrapper = Directory(clientWrapper!);
+      expect(wrapper.existsSync(), isTrue, reason: 'Invalid Flutter client_wrapper directory.');
+      final Directory temporary = Directory.systemTemp.createTempSync('pigeon_cpp_ffi_native_');
+      try {
+        _generateNativeFixture(temporary);
+        final fixture = File('test/testdata/cpp_ffi_native/main.cc');
+        String source = fixture.readAsStringSync();
+        final String prefix = makeCppFfiSymbolPrefix('native_test', 'messages_ffi.h');
+        final replacements = <String, String>{
+          'FREE': '${prefix}free_buffer',
+          'CONNECT': '$prefix${makeCppFfiMemberName('session', 'Api')}_connect',
+          'DISCONNECT': '$prefix${makeCppFfiMemberName('session', 'Api')}_disconnect',
+          'EVENT_CONNECT':
+              '$prefix${makeCppFfiMemberName('event_session', 'Events', 'events')}_connect',
+          'EVENT_DISCONNECT':
+              '$prefix${makeCppFfiMemberName('event_session', 'Events', 'events')}_disconnect',
+          'LISTEN': '$prefix${makeCppFfiMemberName('event', 'Events', 'events')}_listen',
+          'CANCEL': '$prefix${makeCppFfiMemberName('event', 'Events', 'events')}_cancel',
+          for (final method in <String>['id', 'echo', 'echoAsync', 'hold'])
+            method.toUpperCase(): '$prefix${makeCppFfiMemberName('host', 'Api', method)}',
+        };
+        source = source.replaceAllMapped(
+          RegExp(r'\bPIGEON_TEST_([A-Z_]+)\b'),
+          (Match match) => replacements[match[1]]!,
+        );
+        File(path.join(temporary.path, 'main.cc')).writeAsStringSync(source);
+        final String executable = path.join(
+          temporary.path,
+          Platform.isWindows ? 'native.exe' : 'native',
+        );
+        await _runNativeProcess(compiler ?? zig!, <String>[
+          if (compiler == null) 'c++',
+          '-std=c++17',
+          '-O0',
+          if (!Platform.isWindows) '-pthread',
+          '-I',
+          path.join(wrapper.absolute.path, 'include'),
+          'messages.cc',
+          'messages_ffi.cc',
+          'main.cc',
+          path.join(wrapper.absolute.path, 'standard_codec.cc'),
+          '-o',
+          executable,
+        ], temporary);
+        final String output = await _runNativeProcess(executable, <String>[], temporary);
+        expect(output, contains('All native C++ FFI regression checks passed.'));
+      } finally {
+        temporary.deleteSync(recursive: true);
+      }
+    },
+    skip: skipReason,
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
   for (final isNullable in <bool>[false, true]) {
     for (final isAsynchronous in <bool>[false, true]) {
       test('unwraps enum arguments (nullable: $isNullable, async: $isAsynchronous)', () {
@@ -127,443 +198,110 @@ void main() {
     expect(original.namespace, 'original');
   });
 
-  test('generates C ABI header for sync HostApi', () {
-    final root = Root(
-      apis: <Api>[
-        AstHostApi(
-          name: 'CalculatorApi',
-          methods: <Method>[
-            Method(
-              name: 'add',
-              parameters: <Parameter>[
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'x',
-                ),
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'y',
-                ),
-              ],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-            ),
-          ],
-        ),
-      ],
-      classes: <Class>[],
-      enums: <Enum>[],
-    );
-
-    final sink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.header,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sink,
-      dartPackageName: _packageName,
-    );
-
-    final code = sink.toString();
-    expect(code, contains('typedef struct PigeonFfiBuffer'));
-    expect(code, contains('extern "C"'));
-    expect(
-      code,
-      contains(
-        'PIGEON_FFI_EXPORT PigeonFfiBuffer* ${_symbolPrefix}calculator_api_add(PigeonFfiBuffer* request);',
-      ),
-    );
-    expect(code, contains('#include "messages.h"'));
-    expect(code, contains('#include <functional>'));
-    expect(code, contains('namespace test {'));
-    expect(code, contains('class PigeonFfiSyncDispatcher'));
-    expect(code, contains('virtual ::PigeonFfiBuffer* RunSync'));
-    expect(code, contains('void SetUpCalculatorApiFfi('));
-    expect(code, contains('CalculatorApi* api,'));
-    expect(code, contains('PigeonFfiSyncDispatcher* dispatcher = nullptr);'));
+  test('C ABI exports identify a session for every host and event call', () {
+    final Root root = _root();
+    final String code = _generate(root, FileType.header);
+    final String host = makeCppFfiMemberName('host', 'CalculatorApi', 'add');
+    final String session = makeCppFfiMemberName('session', 'CalculatorApi');
+    final String event = makeCppFfiMemberName('event', 'EventApi', 'streamEvents');
+    expect(code, contains('$_symbolPrefix${session}_connect(PigeonFfiBuffer* request)'));
+    expect(code, contains('$_symbolPrefix${session}_disconnect(int64_t session_id)'));
+    expect(code, contains('$_symbolPrefix$host(int64_t session_id, PigeonFfiBuffer* request)'));
+    expect(code, contains('$_symbolPrefix${event}_listen('));
+    expect(code, contains('$_symbolPrefix${event}_cancel('));
+    expect(code, contains('void TearDownCalculatorApiFfi(const std::string& instance_name = "")'));
+    expect(code, contains('const std::string& instance_name = ""'));
+    expect(code, isNot(contains('PigeonFfiSyncDispatcher')));
   });
 
-  test('generates C++ source dispatch for sync HostApi', () {
-    final root = Root(
-      apis: <Api>[
-        AstHostApi(
-          name: 'CalculatorApi',
-          methods: <Method>[
-            Method(
-              name: 'add',
-              parameters: <Parameter>[
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'x',
-                ),
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'y',
-                ),
-              ],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-            ),
-          ],
-        ),
-      ],
-      classes: <Class>[],
-      enums: <Enum>[],
-    );
-
-    final sink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.source,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sink,
-      dartPackageName: _packageName,
-    );
-
-    final code = sink.toString();
-    expect(code, contains('#include "messages_ffi.h"'));
-    expect(code, contains('namespace test {'));
-    expect(code, contains('CalculatorApi* g_calculator_api_api = nullptr;'));
-    expect(code, contains('PigeonFfiSyncDispatcher* g_calculator_api_dispatcher = nullptr;'));
-    expect(code, contains('void SetUpCalculatorApiFfi('));
-    expect(code, contains('PigeonFfiSyncDispatcher* dispatcher)'));
-    expect(code, contains('g_calculator_api_dispatcher = dispatcher;'));
-    expect(
-      code,
-      contains('std::unique_ptr<::flutter::EncodableValue> message = codec.DecodeMessage'),
-    );
-    expect(code, contains('const int64_t x_arg = encodable_x_arg.LongValue();'));
-    expect(code, contains('ErrorOr<int64_t> output = g_calculator_api_api->Add(x_arg, y_arg);'));
-    expect(code, contains('::flutter::EncodableValue(output.value())'));
-    expect(code, contains('return PigeonFfiEncodeMessage'));
-    expect(code, contains('PigeonCalculatorApiAddFfiDispatch(PigeonFfiBuffer* request)'));
-    expect(code, contains('if (g_calculator_api_dispatcher != nullptr)'));
-    expect(code, contains('return g_calculator_api_dispatcher->RunSync([request]() {'));
-    expect(code, contains('return PigeonCalculatorApiAddFfi(request);'));
-    expect(code, isNot(contains('TakeValue()')));
-    expect(code, contains('}  // namespace test'));
-    expect(
-      code,
-      contains(
-        'extern "C" PigeonFfiBuffer* ${_symbolPrefix}calculator_api_add(PigeonFfiBuffer* request)',
-      ),
-    );
-    expect(code, contains('return test::PigeonCalculatorApiAddFfiDispatch(request);'));
-    expect(code, isNot(contains('TODO')));
+  test('HostApi calls hold registrations and suppress late or duplicate replies', () {
+    final String code = _generate(_root(), FileType.source);
+    expect(code, contains('session->registration->api->Add(x_arg)'));
+    expect(code, isNot(contains('RunSync')));
+    expect(code, contains('PigeonFfiLease registration_lease'));
+    expect(code, contains('PigeonFfiLease session_lease'));
+    expect(code, contains('FFI session has been disconnected.'));
+    expect(code, contains('sent_.exchange(true)'));
+    expect(code, contains('reply_state->Send('));
+    expect(code, contains('catch (const std::exception& exception)'));
+    expect(code, contains('catch (...)'));
+    expect(code, isNot(contains('g_calculator_api_api')));
+    expect(code, isNot(contains('dispatcher')));
   });
 
-  test('generates duplicate registration guard and teardown for HostApi', () {
-    final root = Root(
-      apis: <Api>[
-        AstHostApi(
-          name: 'CalculatorApi',
-          methods: <Method>[
-            Method(
-              name: 'add',
-              parameters: <Parameter>[
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'x',
-                ),
-              ],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-            ),
-          ],
-        ),
-      ],
-      classes: <Class>[],
-      enums: <Enum>[],
-    );
-
-    final headerSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.header,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      headerSink,
-      dartPackageName: _packageName,
-    );
-    expect(headerSink.toString(), contains('void TearDownCalculatorApiFfi();'));
-
-    final sourceSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.source,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sourceSink,
-      dartPackageName: _packageName,
-    );
-    final code = sourceSink.toString();
-    expect(code, contains('if (g_calculator_api_api != nullptr) {'));
-    expect(code, contains('SetUpCalculatorApiFfi() called more than once.'));
-    expect(code, contains('void TearDownCalculatorApiFfi() {'));
-    expect(code, contains('g_calculator_api_api = nullptr;'));
-    expect(code, contains('g_calculator_api_dispatcher = nullptr;'));
+  test('named registration teardown closes gates before releasing borrowed implementations', () {
+    final String code = _generate(_root(), FileType.source);
+    expect(code, contains('const std::string& instance_name)'));
+    expect(code, contains('.SetUp(api, instance_name)'));
+    expect(code, contains('.TearDown(instance_name)'));
+    expect(code, contains('idle_.wait(lock, [this] { return calls_ == 0; })'));
+    expect(code, contains('Cannot close an FFI registration from its active call.'));
+    expect(code, contains('session_->registration->gate'));
+    expect(code, contains('session_->gate'));
+    expect(code, contains('session->CancelStream(sink_id,'));
   });
 
-  test('generates duplicate registration guard and teardown for EventChannelApi', () {
+  for (final asynchronous in <bool>[false, true]) {
+    test('nullable int accepts both codec integer widths (async: $asynchronous)', () {
+      final api = AstHostApi(
+        name: 'Api',
+        methods: <Method>[
+          Method(
+            name: 'accept',
+            location: ApiLocation.host,
+            isAsynchronous: asynchronous,
+            returnType: const TypeDeclaration.voidDeclaration(),
+            parameters: <Parameter>[
+              Parameter(
+                name: 'value',
+                type: const TypeDeclaration(baseName: 'int', isNullable: true),
+              ),
+            ],
+          ),
+        ],
+      );
+      final root = Root(apis: <Api>[api], classes: <Class>[], enums: <Enum>[]);
+      final String code = _generate(root, FileType.source);
+      expect(code, contains('encodable_value_arg.LongValue()'));
+      expect(code, contains('encodable_value_arg.IsNull() ? nullptr : &value_arg_value'));
+      expect(code, isNot(contains('std::get_if<int64_t>(&encodable_value_arg)')));
+    });
+  }
+
+  test('API and method boundaries cannot collide in C exports or C++ helpers', () {
     final root = Root(
       apis: <Api>[
-        AstEventChannelApi(
-          name: 'EventApi',
-          methods: <Method>[
-            Method(
-              name: 'streamEvents',
-              parameters: <Parameter>[],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-            ),
-          ],
-        ),
-      ],
-      classes: <Class>[],
-      enums: <Enum>[],
-      containsEventChannel: true,
-    );
-
-    final headerSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.header,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      headerSink,
-      dartPackageName: _packageName,
-    );
-    expect(headerSink.toString(), contains('void TearDownEventApiStreamEventsFfi();'));
-
-    final sourceSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.source,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sourceSink,
-      dartPackageName: _packageName,
-    );
-    final code = sourceSink.toString();
-    expect(code, contains('if (g_event_api_stream_events_handler != nullptr) {'));
-    expect(code, contains('SetUpEventApiStreamEventsFfi() called more than once.'));
-    expect(code, contains('void TearDownEventApiStreamEventsFfi() {'));
-    expect(code, contains('g_event_api_stream_events_handler = nullptr;'));
-    expect(code, contains('g_event_api_stream_events_dispatcher = nullptr;'));
-  });
-
-  test('generates C ABI adapter for async HostApi', () {
-    final root = Root(
-      apis: <Api>[
-        AstHostApi(
-          name: 'CalculatorApi',
-          methods: <Method>[
-            Method(
-              name: 'add',
-              parameters: <Parameter>[
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'x',
-                ),
-                Parameter(
-                  type: const TypeDeclaration(baseName: 'int', isNullable: false),
-                  name: 'y',
-                ),
-              ],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-              isAsynchronous: true,
-            ),
-          ],
-        ),
+        for (final (String api, String method) in <(String, String)>[
+          ('FooBar', 'baz'),
+          ('Foo', 'barBaz'),
+          ('Api', 'freeBuffer'),
+        ])
+          AstHostApi(
+            name: api,
+            methods: <Method>[
+              Method(
+                name: method,
+                location: ApiLocation.host,
+                returnType: const TypeDeclaration.voidDeclaration(),
+                parameters: <Parameter>[],
+              ),
+            ],
+          ),
       ],
       classes: <Class>[],
       enums: <Enum>[],
     );
-
-    final headerSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.header,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      headerSink,
-      dartPackageName: _packageName,
-    );
-
-    final headerCode = headerSink.toString();
-    expect(headerCode, contains('typedef void (*PigeonFfiReplyCallback)'));
-    expect(headerCode, contains('PIGEON_FFI_EXPORT void ${_symbolPrefix}calculator_api_add('));
-    expect(headerCode, contains('int64_t reply_id,'));
-    expect(headerCode, contains('PigeonFfiReplyCallback on_reply);'));
-
-    final sourceSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.source,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sourceSink,
-      dartPackageName: _packageName,
-    );
-
-    final sourceCode = sourceSink.toString();
-    expect(sourceCode, contains('void PigeonFfiSendReply('));
-    expect(sourceCode, contains('void PigeonCalculatorApiAddFfi('));
-    expect(sourceCode, contains('[reply_id, on_reply](ErrorOr<int64_t>&& output)'));
-    expect(sourceCode, contains('PigeonFfiSendReply(reply_id, on_reply'));
-    expect(sourceCode, contains('void PigeonCalculatorApiAddFfiDispatch('));
-    expect(
-      sourceCode,
-      contains('PigeonFfiBuffer* dispatch_error = g_calculator_api_dispatcher->RunSync([=]() {'),
-    );
-    expect(sourceCode, contains('return static_cast<PigeonFfiBuffer*>(nullptr);'));
-    expect(sourceCode, contains('extern "C" void ${_symbolPrefix}calculator_api_add('));
-    expect(
-      sourceCode,
-      contains('test::PigeonCalculatorApiAddFfiDispatch(request, reply_id, on_reply);'),
-    );
-  });
-
-  test('generates C ABI adapter for EventChannelApi', () {
-    final root = Root(
-      apis: <Api>[
-        AstEventChannelApi(
-          name: 'EventApi',
-          methods: <Method>[
-            Method(
-              name: 'streamEvents',
-              parameters: <Parameter>[],
-              location: ApiLocation.host,
-              returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
-            ),
-          ],
-        ),
-      ],
-      classes: <Class>[],
-      enums: <Enum>[],
-      containsEventChannel: true,
-    );
-
-    final headerSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.header,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      headerSink,
-      dartPackageName: _packageName,
-    );
-
-    final headerCode = headerSink.toString();
-    expect(headerCode, contains('typedef void (*PigeonFfiEventCallback)'));
-    expect(headerCode, contains('${_symbolPrefix}event_api_stream_events_listen'));
-    expect(headerCode, contains('${_symbolPrefix}event_api_stream_events_cancel'));
-    expect(headerCode, contains('class PigeonEventApiStreamEventsEventSink'));
-    expect(headerCode, contains('class PigeonEventApiStreamEventsStreamHandler'));
-    expect(headerCode, contains('void SetUpEventApiStreamEventsFfi('));
-    expect(headerCode, contains('PigeonFfiSyncDispatcher* dispatcher = nullptr);'));
-
-    final sourceSink = StringBuffer();
-    const CppFfiGenerator().generate(
-      OutputFileOptions<InternalCppFfiOptions>(
-        fileType: FileType.source,
-        languageOptions: const InternalCppFfiOptions(
-          headerIncludePath: 'messages_ffi.h',
-          apiHeaderIncludePath: 'messages.h',
-          cppFfiHeaderOut: 'messages_ffi.h',
-          cppFfiSourceOut: 'messages_ffi.cc',
-          namespace: 'test',
-        ),
-      ),
-      root,
-      sourceSink,
-      dartPackageName: _packageName,
-    );
-
-    final sourceCode = sourceSink.toString();
-    expect(sourceCode, contains('const ::flutter::StandardMessageCodec& PigeonFfiGetCodec()'));
-    expect(
-      sourceCode,
-      contains(
-        'PigeonEventApiStreamEventsStreamHandler* g_event_api_stream_events_handler = nullptr;',
-      ),
-    );
-    expect(
-      sourceCode,
-      contains('PigeonFfiSyncDispatcher* g_event_api_stream_events_dispatcher = nullptr;'),
-    );
-    expect(sourceCode, contains('class PigeonEventApiStreamEventsEventSinkImpl'));
-    expect(sourceCode, contains('handler->OnListen(instance_name, std::move(sink));'));
-    expect(sourceCode, contains('handler->OnCancel(instance_name);'));
-    expect(sourceCode, contains('return g_event_api_stream_events_dispatcher->RunSync([=]() {'));
-    expect(sourceCode, contains('return test::PigeonEventApiStreamEventsListenFfiDispatch'));
-    expect(sourceCode, contains('return test::PigeonEventApiStreamEventsCancelFfiDispatch'));
+    final String header = _generate(root, FileType.header);
+    final String source = _generate(root, FileType.source);
+    final names = <String>{};
+    for (final AstHostApi api in root.apis.whereType<AstHostApi>()) {
+      final String name = makeCppFfiMemberName('host', api.name, api.methods.single.name);
+      names.add(name);
+      expect(header, contains('$_symbolPrefix$name(int64_t session_id,'));
+      expect(source, contains('Pigeon_$name('));
+    }
+    expect(names, hasLength(3));
+    expect(header, contains('${_symbolPrefix}free_buffer(PigeonFfiBuffer* buffer)'));
   });
 
   test('validates unsupported api shapes', () {
@@ -621,4 +359,162 @@ void main() {
       isNot(contains('C++ FFI does not support async HostApi method "doIt"')),
     );
   });
+}
+
+Root _root() => Root(
+  apis: <Api>[
+    AstHostApi(
+      name: 'CalculatorApi',
+      methods: <Method>[
+        for (final asynchronous in <bool>[false, true])
+          Method(
+            name: asynchronous ? 'addAsync' : 'add',
+            location: ApiLocation.host,
+            isAsynchronous: asynchronous,
+            returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+            parameters: <Parameter>[
+              Parameter(
+                name: 'x',
+                type: const TypeDeclaration(baseName: 'int', isNullable: false),
+              ),
+            ],
+          ),
+      ],
+    ),
+    AstEventChannelApi(
+      name: 'EventApi',
+      methods: <Method>[
+        Method(
+          name: 'streamEvents',
+          location: ApiLocation.host,
+          returnType: const TypeDeclaration(baseName: 'int', isNullable: false),
+          parameters: <Parameter>[],
+        ),
+      ],
+    ),
+  ],
+  classes: <Class>[],
+  enums: <Enum>[],
+  containsHostApi: true,
+  containsEventChannel: true,
+);
+
+String _generate(
+  Root root,
+  FileType type, {
+  String namespace = 'test',
+  String dartPackageName = _packageName,
+}) {
+  final sink = StringBuffer();
+  const CppFfiGenerator().generate(
+    OutputFileOptions<InternalCppFfiOptions>(
+      fileType: type,
+      languageOptions: InternalCppFfiOptions(
+        cppFfiHeaderOut: 'messages_ffi.h',
+        cppFfiSourceOut: 'messages_ffi.cc',
+        headerIncludePath: 'messages_ffi.h',
+        apiHeaderIncludePath: 'messages.h',
+        namespace: namespace,
+      ),
+    ),
+    root,
+    sink,
+    dartPackageName: dartPackageName,
+  );
+  return sink.toString();
+}
+
+Future<String> _runNativeProcess(
+  String executable,
+  List<String> arguments,
+  Directory workingDirectory,
+) async {
+  final Process process = await Process.start(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory.path,
+  );
+  final Future<String> stdout = process.stdout.transform(utf8.decoder).join();
+  final Future<String> stderr = process.stderr.transform(utf8.decoder).join();
+  int exitCode;
+  try {
+    exitCode = await process.exitCode.timeout(const Duration(minutes: 2));
+  } on TimeoutException {
+    process.kill();
+    await process.exitCode;
+    fail('Native command timed out: $executable\n${await stdout}\n${await stderr}');
+  }
+  final output = '${await stdout}\n${await stderr}';
+  expect(exitCode, 0, reason: 'Native command failed: $executable\n$output');
+  return output;
+}
+
+void _generateNativeFixture(Directory output) {
+  const intType = TypeDeclaration(baseName: 'int', isNullable: false);
+  const nullableIntType = TypeDeclaration(baseName: 'int', isNullable: true);
+  final root = Root(
+    apis: <Api>[
+      AstHostApi(
+        name: 'Api',
+        methods: <Method>[
+          for (final method in <String>['id', 'hold'])
+            Method(
+              name: method,
+              location: ApiLocation.host,
+              isAsynchronous: method == 'hold',
+              returnType: intType,
+              parameters: <Parameter>[],
+            ),
+          for (final asynchronous in <bool>[false, true])
+            Method(
+              name: asynchronous ? 'echoAsync' : 'echo',
+              location: ApiLocation.host,
+              isAsynchronous: asynchronous,
+              returnType: nullableIntType,
+              parameters: <Parameter>[Parameter(name: 'value', type: nullableIntType)],
+            ),
+        ],
+      ),
+      AstEventChannelApi(
+        name: 'Events',
+        methods: <Method>[
+          Method(
+            name: 'events',
+            location: ApiLocation.host,
+            returnType: intType,
+            parameters: <Parameter>[],
+          ),
+        ],
+      ),
+    ],
+    classes: <Class>[],
+    enums: <Enum>[],
+    containsHostApi: true,
+    containsEventChannel: true,
+  );
+  for (final type in <FileType>[FileType.header, FileType.source]) {
+    final api = StringBuffer();
+    const CppGenerator().generate(
+      OutputFileOptions<InternalCppOptions>(
+        fileType: type,
+        languageOptions: const InternalCppOptions(
+          headerIncludePath: 'messages.h',
+          cppHeaderOut: 'messages.h',
+          cppSourceOut: 'messages.cc',
+          namespace: 'native_test',
+        ),
+      ),
+      root,
+      api,
+      dartPackageName: 'native_test',
+    );
+    File(
+      path.join(output.path, type == FileType.header ? 'messages.h' : 'messages.cc'),
+    ).writeAsStringSync(api.toString());
+    File(
+      path.join(output.path, type == FileType.header ? 'messages_ffi.h' : 'messages_ffi.cc'),
+    ).writeAsStringSync(
+      _generate(root, type, namespace: 'native_test', dartPackageName: 'native_test'),
+    );
+  }
 }

@@ -14,7 +14,12 @@ void checkEventKeepAlive(bool expected) {
 
 Future<void> main() async {
   final bindings = pigeon_ffi.NativeLibrary(ffi.DynamicLibrary.process());
-  final api = Api(ffiBindings: bindings);
+  final lazy = Api(ffiBindings: bindings, messageChannelSuffix: 'lazy');
+  check(pigeon_ffi.NativeLibrary.connectCalls == 0, 'constructor must not connect');
+  lazy.pigeonDispose();
+  lazy.pigeonDispose();
+  check(pigeon_ffi.NativeLibrary.disconnectCalls == 0, 'unused API needs no disconnect');
+  final api = Api(ffiBindings: bindings, messageChannelSuffix: 'engine-a');
   final first = api.work();
   final second = api.work();
   final callback = _pigeonFfiReplyCallback.nativeFunction;
@@ -46,14 +51,65 @@ Future<void> main() async {
   }
   check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'startup failure cleared');
 
+  bindings.failStart = false;
+  final independent = Api(ffiBindings: bindings, messageChannelSuffix: 'engine-b');
+  final pending = api.work().then<Object>((_) => 'unexpected success', onError: (Object error) => error);
+  final survivor = independent.work();
+  final firstSession = bindings.replies[0].$1;
+  final secondSession = bindings.replies[1].$1;
+  check(firstSession != secondSession, 'separate facades need separate sessions');
+  check(pigeon_ffi.NativeLibrary.sessions[firstSession] == 'engine-a', 'first registration name');
+  check(pigeon_ffi.NativeLibrary.sessions[secondSession] == 'engine-b', 'second registration name');
+  api.pigeonDispose();
+  api.pigeonDispose();
+  check(await pending is StateError, 'dispose must fail owned pending calls');
+  check(_pigeonFfiReplyCallback.keepIsolateAlive, 'other owner is still pending');
+  bindings.reply(<Object?>[100]); // A callback already queued before disconnect.
+  bindings.reply(<Object?>[17]);
+  check(await survivor == 17, 'disposing one facade must preserve another');
+  check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'disposed callbacks must not keep alive');
+  try {
+    await api.work();
+    throw StateError('Disposed API was reused.');
+  } on StateError catch (error) {
+    check(error.message == 'This FFI API has been disposed.', 'dispose must reject new calls');
+  }
+  independent.pigeonDispose();
+
+  // Two wrappers can share the default native registration without sharing
+  // ownership of pending requests or of their session lifetimes.
+  final sharedFirst = Api(ffiBindings: bindings);
+  final sharedSecond = Api(ffiBindings: bindings);
+  final sharedPending = sharedFirst.work().then<Object>((_) => 'unexpected success', onError: (Object error) => error);
+  final sharedSurvivor = sharedSecond.work();
+  final sharedFirstSession = bindings.replies[0].$1;
+  final sharedSecondSession = bindings.replies[1].$1;
+  check(sharedFirstSession != sharedSecondSession, 'shared registration needs separate sessions');
+  check(pigeon_ffi.NativeLibrary.sessions[sharedFirstSession] == '' &&
+      pigeon_ffi.NativeLibrary.sessions[sharedSecondSession] == '', 'wrappers must select the same default registration');
+  sharedFirst.pigeonDispose();
+  check(await sharedPending is StateError, 'shared dispose must fail its own request');
+  check(pigeon_ffi.NativeLibrary.sessions.containsKey(sharedSecondSession), 'shared dispose removed another session');
+  bindings.reply(<Object?>[100]); // Already posted before the first disconnect.
+  bindings.reply(<Object?>[23]);
+  check(await sharedSurvivor == 23, 'shared dispose failed another owner request');
+  final sharedAgain = sharedSecond.work();
+  bindings.reply(<Object?>[24]);
+  check(await sharedAgain == 24, 'surviving shared wrapper must accept new calls');
+  sharedSecond.pigeonDispose();
+  await pigeon_ffi.NativeLibrary.waitForBuffers();
+  check(!_pigeonFfiReplyCallback.keepIsolateAlive, 'shared wrappers retained idle callback');
+  check(pigeon_ffi.NativeLibrary.sessions.isEmpty, 'shared wrappers leaked native sessions');
+
   final event = Completer<int>();
   final errors = <Object>[];
   final done = Completer<void>();
-  final firstStream = events(instanceName: 'first');
+  final firstStream = events(instanceName: 'first', messageChannelSuffix: 'engine-a');
   final subscription = firstStream.listen(event.complete, onError: errors.add);
-  final other = events(instanceName: 'second').listen((_) {}, onDone: done.complete);
+  final other = events(instanceName: 'first', messageChannelSuffix: 'engine-b').listen((_) {}, onDone: done.complete);
   final ids = _pigeonFfiEventControllers.keys.toList();
   checkEventKeepAlive(true);
+  check(pigeon_ffi.NativeLibrary.streamSessions[ids.first] != pigeon_ffi.NativeLibrary.streamSessions[ids.last], 'event registrations need distinct sessions');
   final notify = _pigeonFfiOnEventCallback.nativeFunction
       .asFunction<void Function(int, ffi.Pointer<pigeon_ffi.PigeonFfiBuffer>)>();
   notify(ids.first, pigeon_ffi.NativeLibrary.buffer(42));
@@ -78,6 +134,25 @@ Future<void> main() async {
   checkEventKeepAlive(false);
   await pigeon_ffi.NativeLibrary.waitForBuffers();
 
+  final sharedEvent = Completer<int>();
+  final sharedEventFirst = events(instanceName: 'shared-first').listen((_) {});
+  final sharedEventSecond = events(instanceName: 'shared-second').listen(sharedEvent.complete);
+  final sharedEventIds = _pigeonFfiEventControllers.keys.toList();
+  check(sharedEventIds.length == 2, 'shared handler needs independent controllers');
+  for (final id in sharedEventIds) {
+    final session = pigeon_ffi.NativeLibrary.streamSessions[id]!;
+    check(pigeon_ffi.NativeLibrary.sessions[session] == '', 'shared event handler must use default registration');
+  }
+  await sharedEventFirst.cancel();
+  checkEventKeepAlive(true);
+  notify(sharedEventIds.first, pigeon_ffi.NativeLibrary.buffer(100));
+  notify(sharedEventIds.last, pigeon_ffi.NativeLibrary.buffer(25));
+  check(await sharedEvent.future == 25, 'shared cancel stopped another event subscription');
+  await sharedEventSecond.cancel();
+  await pigeon_ffi.NativeLibrary.waitForBuffers();
+  checkEventKeepAlive(false);
+  check(pigeon_ffi.NativeLibrary.sessions.isEmpty, 'shared event subscriptions leaked sessions');
+
   pigeon_ffi.NativeLibrary.failListen = true;
   final listenError = Completer<Object>();
   final failed = events().listen((_) {}, onError: listenError.complete);
@@ -97,6 +172,8 @@ Future<void> main() async {
   checkEventKeepAlive(false);
   check(_pigeonFfiAsyncReplies.isEmpty, 'requests leaked');
   check(_pigeonFfiEventControllers.isEmpty, 'subscriptions leaked');
+  check(pigeon_ffi.NativeLibrary.sessions.isEmpty, 'sessions leaked');
+  check(pigeon_ffi.NativeLibrary.streamSessions.isEmpty, 'native streams leaked');
   check(pigeon_ffi.NativeLibrary.allocated == pigeon_ffi.NativeLibrary.freed, 'buffers leaked');
   print('All callback lifecycle checks passed.');
 }
