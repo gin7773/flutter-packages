@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <optional>
 
 #include "pigeon/nullable_returns.gen.h"
@@ -44,40 +45,75 @@ class TestNullableReturnHostApi : public NullableReturnHostApi {
 const EncodableValue& GetResult(const EncodableValue& pigeon_response) {
   return std::get<EncodableList>(pigeon_response)[0];
 }
+
+class NullableIntegerTest : public testing::TestWithParam<EncodableValue> {};
+
+// Replies with a codec value of the requested width, as Dart's codec would.
+class IntegerReplyMessenger : public flutter::BinaryMessenger {
+ public:
+  explicit IntegerReplyMessenger(const EncodableValue& value) : value_(value) {}
+
+  void Send(const std::string& channel, const uint8_t* message,
+            size_t message_size, flutter::BinaryReply reply) const override {
+    const auto encoded = NullableReturnFlutterApi::GetCodec().EncodeMessage(
+        EncodableValue(EncodableList{value_}));
+    reply(encoded->data(), encoded->size());
+  }
+
+  void SetMessageHandler(const std::string& channel,
+                         flutter::BinaryMessageHandler handler) override {}
+
+ private:
+  EncodableValue value_;
+};
 }  // namespace
 
-TEST(NullableReturns, HostNullableArgNull) {
+TEST_P(NullableIntegerTest, HostNullableArg) {
   FakeHostMessenger messenger(&NullableArgHostApi::GetCodec());
   TestNullableArgHostApi api;
   NullableArgHostApi::SetUp(&messenger, &api);
 
-  int64_t result = 0;
+  std::optional<int64_t> result;
   messenger.SendHostMessage(
       "dev.flutter.pigeon.pigeon_integration_tests.NullableArgHostApi.doit",
-      EncodableValue(EncodableList({EncodableValue()})),
+      EncodableValue(EncodableList{GetParam()}),
       [&result](const EncodableValue& reply) {
         result = GetResult(reply).LongValue();
       });
 
-  EXPECT_EQ(result, 42);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, GetParam().IsNull() ? 42 : GetParam().LongValue());
 }
 
-TEST(NullableReturns, HostNullableArgNonNull) {
-  FakeHostMessenger messenger(&NullableArgHostApi::GetCodec());
-  TestNullableArgHostApi api;
-  NullableArgHostApi::SetUp(&messenger, &api);
+TEST_P(NullableIntegerTest, FlutterNullableReturn) {
+  IntegerReplyMessenger messenger(GetParam());
+  NullableReturnFlutterApi api(&messenger);
 
-  int64_t result = 0;
-  int64_t seven = 7;
-  messenger.SendHostMessage(
-      "dev.flutter.pigeon.pigeon_integration_tests.NullableArgHostApi.doit",
-      EncodableValue(EncodableList({EncodableValue(seven)})),
-      [&result](const EncodableValue& reply) {
-        result = GetResult(reply).LongValue();
-      });
+  bool replied = false;
+  api.Doit(
+      [&replied](const int64_t* result) {
+        replied = true;
+        if (GetParam().IsNull()) {
+          EXPECT_EQ(result, nullptr);
+        } else {
+          ASSERT_NE(result, nullptr);
+          EXPECT_EQ(*result, GetParam().LongValue());
+        }
+      },
+      [](const FlutterError& error) { FAIL() << error.code(); });
 
-  EXPECT_EQ(result, 7);
+  EXPECT_TRUE(replied);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    CodecIntegerWidths, NullableIntegerTest,
+    testing::Values(EncodableValue(), EncodableValue(int32_t{0}),
+                    EncodableValue(int32_t{7}), EncodableValue(int32_t{-7}),
+                    EncodableValue(std::numeric_limits<int32_t>::min()),
+                    EncodableValue(std::numeric_limits<int32_t>::max()),
+                    EncodableValue(int64_t{7}),
+                    EncodableValue(std::numeric_limits<int64_t>::min()),
+                    EncodableValue(std::numeric_limits<int64_t>::max())));
 
 TEST(NullableReturns, HostNullableReturnNull) {
   FakeHostMessenger messenger(&NullableReturnHostApi::GetCodec());

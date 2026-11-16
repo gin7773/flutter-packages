@@ -1,6 +1,7 @@
-## NEXT
+## 30.0.3
 
 * Updates minimum supported SDK version to Flutter 3.44/Dart 3.12.
+* [cpp] Fixes nullable integer arguments and Flutter API return values being read as null when encoded as 32-bit integers.
 
 ## 30.0.2
 
