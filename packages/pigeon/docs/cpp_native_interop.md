@@ -1,5 +1,8 @@
 # Experimental C++ native interop (Windows)
 
+For step-by-step verification from GitHub on another Windows machine, see the
+[中文验证步骤](cpp_native_interop_verification_zh.md).
+
 This backend implements the existing `HostApiForNativeInterop` interface. The
 normal `HostApi` class and its Platform Channel constructor remain available.
 It supports synchronous and asynchronous HostApi methods, including
