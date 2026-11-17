@@ -18,6 +18,7 @@ import 'package:yaml/yaml.dart' as yaml;
 
 import 'ast.dart';
 import 'ast_generator.dart';
+import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
 import 'generator_tools.dart';
@@ -135,6 +136,9 @@ class InternalPigeonOptions {
               copyrightHeader: copyrightHeader,
               useJni: options.kotlinOptions?.useJni ?? false,
               useFfi: options.swiftOptions?.useFfi ?? false,
+              cppFfiLibraryName: (options.cppOptions?.useFfi ?? false)
+                  ? options.cppOptions?.ffiLibraryName
+                  : null,
               ffiErrorClassName: options.swiftOptions?.errorClassName ?? 'PigeonError',
               jniErrorClassName: options.kotlinOptions?.errorClassName ?? 'FlutterError',
               fileSpecificClassNameComponent: _dartNativeInteropClassNameComponent(options),
@@ -880,6 +884,32 @@ class CppGeneratorAdapter implements GeneratorAdapter {
     );
     const generator = CppGenerator();
     generator.generate(outputFileOptions, root, sink, dartPackageName: options.dartPackageName);
+    final InternalCppOptions cpp = options.cppOptions!;
+    if (cpp.useFfi) {
+      final buffer = StringBuffer();
+      generateCppFfi(cpp, root, buffer, package: options.dartPackageName, fileType: fileType);
+      _writeToOutput(
+        fileType == FileType.header
+            ? cppFfiHeader(cpp.cppHeaderOut)
+            : cppFfiSource(cpp.cppSourceOut),
+        buffer.toString(),
+        basePath: options.basePath ?? '',
+      );
+      if (fileType == FileType.source) {
+        final config = StringBuffer();
+        generateCppFfiConfig(
+          cpp,
+          options.dartOptions!.dartOut!,
+          config,
+          package: options.dartPackageName,
+        );
+        _writeToOutput(
+          cppFfiConfig(cpp.cppHeaderOut),
+          config.toString(),
+          basePath: options.basePath ?? '',
+        );
+      }
+    }
   }
 
   @override
@@ -897,6 +927,20 @@ class CppGeneratorAdapter implements GeneratorAdapter {
     _errorOnEventChannelApi(errors, languageString, root);
     _errorOnSealedClass(errors, languageString, root);
     _errorOnInheritedClass(errors, languageString, root);
+    if (options.cppOptions?.useFfi ?? false) {
+      _errorOnTaskQueueInNativeInterop(errors, 'C++ FFI', root);
+      for (final Api api in root.apis) {
+        if (api is! AstHostApi) {
+          errors.add(Error(message: 'C++ FFI supports HostApi only (in API "${api.name}").'));
+        }
+        if (api is AstHostApi && api.methods.any((Method m) => m.name == 'pigeonDispose')) {
+          errors.add(Error(message: 'C++ FFI reserves the method name pigeonDispose.'));
+        }
+      }
+      if (options.dartOptions?.nativeInteropTransport == NativeInteropTransport.objects) {
+        errors.add(Error(message: 'C++ FFI requires the hybrid native interop transport.'));
+      }
+    }
     return errors;
   }
 }

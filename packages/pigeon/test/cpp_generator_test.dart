@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:pigeon/src/ast.dart';
+import 'package:pigeon/src/cpp/cpp_ffi_generator.dart';
 import 'package:pigeon/src/cpp/cpp_generator.dart';
+import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
-import 'package:pigeon/src/pigeon_lib.dart' show Error;
+import 'package:pigeon/src/pigeon_lib.dart' show Error, ParseResults, Pigeon;
 import 'package:test/test.dart';
 
 const String DEFAULT_PACKAGE_NAME = 'test_package';
@@ -26,6 +29,85 @@ final Enum emptyEnum = Enum(
 );
 
 void main() {
+  test('C++ FFI options round trip and default to disabled', () {
+    expect(const CppOptions().useFfi, isFalse);
+    final CppOptions options = CppOptions.fromMap(
+      const CppOptions(useFfi: true, ffiLibraryName: 'test.dll').toMap(),
+    );
+    expect(options.useFfi, isTrue);
+    expect(options.ffiLibraryName, 'test.dll');
+  });
+
+  test('C++ native interop uses the shared hybrid transport and companion', () {
+    final ParseResults parsed = Pigeon.setup().parseFile('test/fixtures/cpp_native_interop.dart');
+    expect(parsed.errors, isEmpty);
+    final Root root = parsed.root;
+    const cpp = InternalCppOptions(
+      headerIncludePath: 'messages.h',
+      cppHeaderOut: 'messages.h',
+      cppSourceOut: 'messages.cpp',
+      namespace: 'cpp_test',
+      useFfi: true,
+      ffiLibraryName: 'test.dll',
+    );
+    final source = StringBuffer();
+    generateCppFfi(cpp, root, source, package: 'cpp_test', fileType: FileType.source);
+    expect(source.toString(), contains('args[0].integer'));
+    expect(source.toString(), contains('const auto& buffer = args[2]'));
+    expect(source.toString(), contains('values->size() != 1'));
+    expect(source.toString(), contains('session->Track(reply)'));
+    expect(source.toString(), contains('entry.second->id == id'));
+    expect(source.toString(), contains('sent.exchange(true)'));
+    const options = InternalDartOptions(
+      dartOut: 'messages.dart',
+      cppFfiLibraryName: 'test.dll',
+      ignoreLints: true,
+    );
+    final main = StringBuffer();
+    const DartGenerator().generate(options, root, main, dartPackageName: 'cpp_test');
+    expect(main.toString(), contains('if (dart.library.ffi)'));
+    expect(main.toString(), contains('BasicMessageChannel'));
+    expect(main.toString(), isNot(contains("import 'dart:ffi'")));
+    final companion = StringBuffer();
+    const DartGenerator().generateNativeInterop(
+      options,
+      root,
+      companion,
+      dartPackageName: 'cpp_test',
+    );
+    expect(companion.toString(), contains('implements CppTestApiForNativeInterop'));
+    expect(companion.toString(), contains('if (Platform.isWindows)'));
+    expect(companion.toString(), contains('NativeCallable<_CppReplyNative>.listener'));
+    expect(companion.toString(), contains('void pigeonDispose() => _session.dispose()'));
+    parseString(content: main.toString());
+    parseString(content: companion.toString());
+    final mixedCompanion = StringBuffer();
+    const DartGenerator().generateNativeInterop(
+      const InternalDartOptions(
+        dartOut: 'messages.dart',
+        cppFfiLibraryName: 'test.dll',
+        useFfi: true,
+        useJni: true,
+        ffiErrorClassName: 'PigeonError',
+        jniErrorClassName: 'FlutterError',
+        ignoreLints: true,
+      ),
+      root,
+      mixedCompanion,
+      dartPackageName: 'cpp_test',
+    );
+    parseString(content: mixedCompanion.toString());
+    expect(mixedCompanion.toString(), contains("'./messages.cpp_ffi.dart'"));
+    expect(mixedCompanion.toString(), contains("'./messages.ffi.dart'"));
+    expect(mixedCompanion.toString(), contains("'./messages.jni.dart'"));
+  });
+
+  test('C++ FFI symbols preserve case and API/method boundaries', () {
+    expect(cppFfiPrefix('test', r'C:\one\Messages.h'), cppFfiPrefix('test', '/two/Messages.h'));
+    expect(cppFfiPrefix('test', 'Messages.h'), isNot(cppFfiPrefix('test', 'messages.h')));
+    expect(cppFfiMember('A', 'BC'), isNot(cppFfiMember('AB', 'C')));
+  });
+
   for (final asynchronous in <bool>[false, true]) {
     test('nullable int arguments use width-independent decoding (async: $asynchronous)', () {
       final root = Root(

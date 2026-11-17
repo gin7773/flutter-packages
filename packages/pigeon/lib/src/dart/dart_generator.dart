@@ -9,9 +9,11 @@ import 'package:path/path.dart' as path;
 import 'package:pub_semver/pub_semver.dart';
 
 import '../ast.dart';
+import '../cpp/cpp_ffi_generator.dart';
 import '../functional.dart';
 import '../generator.dart';
 import '../generator_tools.dart';
+import 'cpp_native_interop.dart';
 import 'proxy_api_generator_helper.dart' as proxy_api_helper;
 import 'templates.dart';
 
@@ -747,6 +749,7 @@ class InternalDartOptions extends InternalOptions {
     this.fileSpecificClassNameComponent,
     this.useJni = false,
     this.useFfi = false,
+    this.cppFfiLibraryName,
     this.ffiErrorClassName,
     this.jniErrorClassName,
     this.nativeInteropTransport = NativeInteropTransport.hybrid,
@@ -761,6 +764,7 @@ class InternalDartOptions extends InternalOptions {
     String? testOut,
     required this.useJni,
     required this.useFfi,
+    this.cppFfiLibraryName,
     this.ffiErrorClassName,
     this.jniErrorClassName,
     this.fileSpecificClassNameComponent,
@@ -787,6 +791,9 @@ class InternalDartOptions extends InternalOptions {
 
   /// Whether to use FFI for generating Swift interop code.
   final bool useFfi;
+
+  /// DLL containing an optional C++ native interop implementation.
+  final String? cppFfiLibraryName;
 
   /// The error class name used for FFI methods.
   final String? ffiErrorClassName;
@@ -893,6 +900,10 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     required String dartPackageName,
   }) {
     indent.writeln("import 'dart:async';");
+    if (generatorOptions.cppFfiLibraryName != null) {
+      indent.writeln("import 'dart:convert' as cpp_convert;");
+      indent.writeln("import 'dart:ffi' as cpp_ffi;");
+    }
     if (generatorOptions.useFfi) {
       indent.writeln("import 'dart:ffi';");
     }
@@ -905,12 +916,20 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
       'Int64List',
       if (generatorOptions.useJni) 'Int8List',
       'TypedData',
+      if (generatorOptions.cppFfiLibraryName != null) ...<String>['Uint8List', 'ByteData'],
     ];
+    if (generatorOptions.cppFfiLibraryName != null) {
+      typedDataClasses.sort();
+    }
     indent.writeln("import 'dart:typed_data' show ${typedDataClasses.join(', ')};");
-    if (_hasNativeInteropEngineKeyedApis(root)) {
+    if ((generatorOptions.useJni || generatorOptions.useFfi) &&
+        _hasNativeInteropEngineKeyedApis(root)) {
       indent.writeln("import 'dart:ui' show PlatformDispatcher;");
     }
     indent.newln();
+    if (generatorOptions.cppFfiLibraryName != null) {
+      indent.writeln("import 'package:ffi/ffi.dart' as cpp_alloc;");
+    }
     if (generatorOptions.useFfi) {
       indent.writeln("import 'package:ffi/ffi.dart';");
     }
@@ -923,6 +942,9 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     }
     final String dartOut = generatorOptions.dartOut ?? '$dartPackageName.g.dart';
     final String baseName = path.basename(dartOut);
+    if (generatorOptions.cppFfiLibraryName != null) {
+      indent.writeln("import './${path.basename(cppFfiDart(dartOut))}' as cpp_bindings;");
+    }
     indent.writeln("import './$baseName';");
     if (generatorOptions.useFfi) {
       indent.writeln(
@@ -2152,6 +2174,19 @@ static ${api.name} implement(${api.name} api, {
     required String dartPackageName,
   }) {
     final dartApiName = '${api.name}ForNativeInterop';
+    if (generatorOptions.cppFfiLibraryName != null &&
+        !generatorOptions.useFfi &&
+        !generatorOptions.useJni) {
+      indent.writeln(
+        '$dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({String channelName = defaultInstanceName}) {',
+      );
+      indent.writeln(
+        'if (Platform.isWindows) { return _${api.name}ForCppNativeInterop(channelName); }',
+      );
+      indent.writeln("throw UnsupportedError('C++ native interop is supported on Windows only.');");
+      indent.writeln('}');
+      return;
+    }
     final implClassName = '_$dartApiName';
     final jniApiRegistrarName = '$_jniBridgePrefix.${api.name}Registrar';
     final ffiApiRegistrarName = '$_ffiBridgePrefix.${api.name}Setup';
@@ -2256,6 +2291,11 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
         'static $dartApiName? getInstance({String channelName = defaultInstanceName}) {',
         '}',
         () {
+          if (generatorOptions.cppFfiLibraryName != null) {
+            indent.writeln(
+              'if (Platform.isWindows) { return _${api.name}ForCppNativeInterop(channelName); }',
+            );
+          }
           var isFirst = true;
           if (generatorOptions.useJni) {
             indent.writeScoped('if (Platform.isAndroid) {', '}', () {
@@ -2320,6 +2360,9 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
       );
       indent.newln();
 
+      if (generatorOptions.cppFfiLibraryName != null) {
+        indent.writeln('@override\nvoid pigeonDispose() {}');
+      }
       fields.forEach(indent.writeln);
 
       indent.newln();
@@ -2938,7 +2981,7 @@ return ${generatorOptions.useJni ? 'await ' : ''}$completerVar.future;
         .join(', ');
   }
 
-  void _writeHostApiNativeInteropInterface(Indent indent, AstHostApi api) {
+  void _writeHostApiNativeInteropInterface(Indent indent, AstHostApi api, {bool cpp = false}) {
     final dartApiName = '${api.name}ForNativeInterop';
     indent.newln();
     indent.format('''
@@ -2953,6 +2996,13 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
 ''');
     indent.newln();
     indent.writeScoped('abstract class $dartApiName {', '}', () {
+      if (cpp) {
+        indent.writeln('/// Releases this C++ session and cancels its pending calls.');
+        indent.writeln(
+          '/// Call before stopping the isolate. Idempotent; no effect on other backends.',
+        );
+        indent.writeln('void pigeonDispose();');
+      }
       indent.writeln(
         '/// Returns instance of $dartApiName with specified [channelName] if one has been registered.',
       );
@@ -3003,7 +3053,11 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
     required String dartPackageName,
   }) {
     if (usesNativeInterop(generatorOptions)) {
-      _writeHostApiNativeInteropInterface(indent, api);
+      _writeHostApiNativeInteropInterface(
+        indent,
+        api,
+        cpp: generatorOptions.cppFfiLibraryName != null,
+      );
     }
     indent.newln();
     addDocumentationComments(indent, api.documentationComments, docCommentSpec);
@@ -3064,6 +3118,10 @@ ${api.name}({
       indent.newln();
       if (usesNativeInterop(generatorOptions)) {
         indent.writeln('final ${api.name}ForNativeInterop? _nativeInteropApi;');
+        if (generatorOptions.cppFfiLibraryName != null) {
+          indent.writeln('/// Releases the injected C++ native interop session.');
+          indent.writeln('void pigeonDispose() => _nativeInteropApi?.pigeonDispose();');
+        }
       }
       for (final Method func in api.methods) {
         indent.newln();
@@ -3432,7 +3490,17 @@ ${api.name}({
       indent,
       dartPackageName: dartPackageName,
     );
-    _writeNativeInteropGeneralUtilities(generatorOptions, root, indent);
+    if (generatorOptions.useJni || generatorOptions.useFfi) {
+      _writeNativeInteropGeneralUtilities(generatorOptions, root, indent);
+    }
+    if (generatorOptions.cppFfiLibraryName != null) {
+      writeCppNativeInterop(
+        indent,
+        root,
+        generatorOptions.cppFfiLibraryName!,
+        castValue: _castValue,
+      );
+    }
     for (final Enum anEnum in root.enums) {
       _writeNativeInteropEnum(generatorOptions, indent, anEnum);
     }
@@ -3459,7 +3527,11 @@ ${api.name}({
         );
       }
     }
-    sink.write(indent.toString());
+    sink.write(
+      generatorOptions.cppFfiLibraryName == null
+          ? indent.toString()
+          : _formatter.format(indent.toString()),
+    );
   }
 
   /// Generates Dart source code for test support libraries based on the given AST
@@ -5200,7 +5272,7 @@ String? _getArgumentsForMethodCall(Iterable<Parameter> parameters) {
 
 /// Returns true if the generated code should use native interop (FFI or JNI).
 bool usesNativeInterop(InternalDartOptions options) {
-  return options.useFfi || options.useJni;
+  return options.useFfi || options.useJni || options.cppFfiLibraryName != null;
 }
 
 /// Returns the path of the generated native interop Dart file corresponding to

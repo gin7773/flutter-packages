@@ -1,0 +1,217 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'messages.dart';
+
+final DynamicLibrary _library = DynamicLibrary.open('pigeon_cpp_test.dll');
+final int Function(Pointer<Uint8>, int, int) _register = _library
+    .lookupFunction<
+      Int64 Function(Pointer<Uint8>, UintPtr, Int64),
+      int Function(Pointer<Uint8>, int, int)
+    >('fixture_register');
+final void Function(int) _unregister = _library
+    .lookupFunction<Void Function(Int64), void Function(int)>('fixture_unregister');
+final void Function(int) _complete = _library
+    .lookupFunction<Void Function(Int64), void Function(int)>('fixture_complete');
+
+int register(String name, int bias) => using((Arena arena) {
+  final List<int> bytes = utf8.encode(name);
+  final Pointer<Uint8> pointer = arena<Uint8>(bytes.length);
+  pointer.asTypedList(bytes.length).setAll(0, bytes);
+  return _register(pointer, bytes.length, bias);
+});
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late int a;
+  late int b;
+  setUp(() {
+    a = register('engine-a', 100);
+    b = register('engine-b', 200);
+    expect(a, isPositive);
+    expect(b, isPositive);
+  });
+  tearDown(() {
+    _unregister(a);
+    _unregister(b);
+  });
+
+  test('hybrid values, nullable values, typed data views, and errors', () async {
+    final CppTestApiForNativeInterop api = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-a',
+    )!;
+    try {
+      expect(api.add(23), 123);
+      expect(api.sumWithNames(1, 2, 3, 4, 5), 15);
+      for (final int? value in <int?>[
+        null,
+        0,
+        -1,
+        2147483648,
+        -9223372036854775808,
+        9223372036854775807,
+      ]) {
+        expect(api.echoInt(value), value);
+      }
+      expect(api.echoBool(true), isTrue);
+      expect(api.echoDouble(-1.25), -1.25);
+      for (final String? value in <String?>[null, '', '中文🙂\u0000tail']) {
+        expect(api.echoString(value), value);
+      }
+      expect(
+        api.echoBytes(Uint8List.sublistView(Uint8List.fromList(<int>[9, 1, 2, 9]), 1, 3)),
+        <int>[1, 2],
+      );
+      expect(api.echoBytes(Uint8List(0)), isEmpty);
+      expect(api.echoInt32(null), isNull);
+      expect(api.echoInt32(Int32List.fromList(<int>[-2147483648, 2147483647])), <int>[
+        -2147483648,
+        2147483647,
+      ]);
+      expect(
+        api.echoInt64(Int64List.fromList(<int>[-9223372036854775808, 9223372036854775807])),
+        <int>[-9223372036854775808, 9223372036854775807],
+      );
+      expect(api.echoFloat64(Float64List.fromList(<double>[1.25, -2.5])), <double>[1.25, -2.5]);
+      expect(api.echoEnum(null), isNull);
+      expect(api.echoEnum(Choice.second), Choice.second);
+      final Box box = Box(value: 31, label: 'box');
+      expect(api.echoBox(box).value, 31);
+      expect(api.mixed(2, box, 'mixed').label, 'mixed');
+      expect(api.mixed(2, box, 'mixed').value, 33);
+      expect(api.echoList(<Object?>[1, null, 'hello']), <Object?>[1, null, 'hello']);
+      expect(api.echoMap(<String?, Object?>{null: 1, 'a': null}), <String?, Object?>{
+        null: 1,
+        'a': null,
+      });
+      expect(api.echoObject(null), isNull);
+      expect((api.echoObject(box)! as Box).value, 31);
+      api.ping();
+      expect(api.fail, throwsA(isA<PlatformException>()));
+      expect(await api.delayed(42).timeout(const Duration(seconds: 5)), 42);
+      expect((await api.asyncBox(box)).value, 31);
+      await api.asyncVoid();
+    } finally {
+      api.pigeonDispose();
+    }
+  });
+
+  test('shared registration, independent sessions, and same-name replacement', () {
+    final CppTestApiForNativeInterop first = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-a',
+    )!;
+    final CppTestApiForNativeInterop shared = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-a',
+    )!;
+    final CppTestApiForNativeInterop other = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-b',
+    )!;
+    try {
+      expect(register('engine-a', 999), 0);
+      expect(
+        () => CppTestApiForNativeInterop.getInstance(channelName: 'missing'),
+        throwsA(isA<PlatformException>()),
+      );
+      first.pigeonDispose();
+      first.pigeonDispose();
+      expect(() => first.add(1), throwsStateError);
+      expect(shared.add(1), 101);
+      expect(other.add(1), 201);
+      final int old = a;
+      _unregister(old);
+      a = register('engine-a', 300);
+      _unregister(old);
+      expect(() => shared.add(1), throwsA(isA<PlatformException>()));
+      final CppTestApiForNativeInterop replacement = CppTestApiForNativeInterop.getInstance(
+        channelName: 'engine-a',
+      )!;
+      try {
+        expect(replacement.add(1), 301);
+      } finally {
+        replacement.pigeonDispose();
+      }
+    } finally {
+      first.pigeonDispose();
+      shared.pigeonDispose();
+      other.pigeonDispose();
+    }
+  });
+
+  test('callback once, disposal, and unregister with pending callbacks', () async {
+    final CppTestApiForNativeInterop api = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-a',
+    )!;
+    final Future<int> once = api.pending(42);
+    _complete(a);
+    expect(await once.timeout(const Duration(seconds: 5)), 42);
+    final Future<void> disposed = expectLater(api.pending(43), throwsStateError);
+    final Future<void> abandoned = expectLater(api.abandoned(), throwsStateError);
+    api.pigeonDispose();
+    _complete(a);
+    await disposed;
+    await abandoned;
+    final CppTestApiForNativeInterop other = CppTestApiForNativeInterop.getInstance(
+      channelName: 'engine-a',
+    )!;
+    final Future<void> removed = expectLater(other.pending(44), throwsA(isA<PlatformException>()));
+    _unregister(a);
+    await removed.timeout(const Duration(seconds: 5));
+    other.pigeonDispose();
+    // Allow replies queued before disposal to drain and release their buffers.
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  });
+
+  test('background isolates use explicit names and dispose before exit', () async {
+    final List<int> results = await Future.wait(
+      List<Future<int>>.generate(
+        4,
+        (int index) => Isolate.run(() async {
+          final CppTestApiForNativeInterop api = CppTestApiForNativeInterop.getInstance(
+            channelName: index.isEven ? 'engine-a' : 'engine-b',
+          )!;
+          try {
+            final int result = api.add(1);
+            await api.delayed(2);
+            return result;
+          } finally {
+            api.pigeonDispose();
+          }
+        }),
+      ),
+    );
+    expect(results, <int>[101, 201, 101, 201]);
+  });
+
+  test('normal API supports injection and keeps the channel path', () async {
+    final CppTestApi api = CppTestApi.createWithNativeInteropApi(messageChannelSuffix: 'engine-a');
+    try {
+      expect(await api.add(1), 101);
+    } finally {
+      api.pigeonDispose();
+    }
+    const BasicMessageChannel<Object?> channel = BasicMessageChannel<Object?>(
+      'dev.flutter.pigeon.cpp_test.CppTestApi.add',
+      CppTestApi.pigeonChannelCodec,
+    );
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockDecodedMessageHandler<Object?>(
+      channel,
+      (Object? message) async => <Object?>[777],
+    );
+    try {
+      expect(await CppTestApi().add(1), 777);
+    } finally {
+      messenger.setMockDecodedMessageHandler<Object?>(channel, null);
+    }
+  });
+}

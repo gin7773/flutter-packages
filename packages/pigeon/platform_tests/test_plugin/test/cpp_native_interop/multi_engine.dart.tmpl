@@ -1,0 +1,54 @@
+// Copyright 2013 The Flutter Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import 'dart:io';
+import 'dart:isolate';
+import 'dart:ui';
+
+import 'messages.dart';
+
+// Used by the standalone two-engine runner, including Release/AOT builds.
+Future<void> main(List<String> args) async {
+  final String name = args[0];
+  final int bias = int.parse(args[1]);
+  final String role = args[2];
+  final File report = File('cpp_engine_$role.result');
+  CppTestApiForNativeInterop? api;
+  try {
+    api = CppTestApiForNativeInterop.getInstance(channelName: name)!;
+    for (var i = 0; i < 100; ++i) {
+      if (api.add(i) != bias + i || await api.delayed(i) != i) {
+        throw StateError('Wrong registration for $role');
+      }
+    }
+    final int background = await Isolate.run(() async {
+      final CppTestApiForNativeInterop child = CppTestApiForNativeInterop.getInstance(
+        channelName: name,
+      )!;
+      try {
+        await child.delayed(42);
+        return child.add(1);
+      } finally {
+        child.pigeonDispose();
+      }
+    });
+    if (background != bias + 1) throw StateError('Wrong background isolate registration');
+    if (role == 'B') {
+      final DateTime deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (!File('cpp_engine_A2.result').existsSync()) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError('Timed out waiting for the replacement engine');
+        }
+        if (api.add(2) != 202) throw StateError('Engine A teardown affected engine B');
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    }
+    api.pigeonDispose();
+    api = null;
+    report.writeAsStringSync('PASS role=$role engineId=${PlatformDispatcher.instance.engineId}\n');
+  } catch (error, stack) {
+    api?.pigeonDispose();
+    report.writeAsStringSync('FAIL $error\n$stack');
+  }
+}

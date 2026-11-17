@@ -1,3 +1,7 @@
+## 30.1.0
+
+* [cpp] Adds experimental Windows HostApi native interop using the shared hybrid transport, named registrations, and independently disposable sessions.
+
 ## 30.0.3
 
 * Updates minimum supported SDK version to Flutter 3.44/Dart 3.12.

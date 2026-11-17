@@ -10,6 +10,11 @@ it removes the need to write custom platform channel or native interop code, sin
 
 For usage examples, see the [Example README](./example/README.md).
 
+Experimental Windows C++ HostApi native interop is available through
+`CppOptions(useFfi: true, ffiLibraryName: 'your_plugin.dll')`. See the
+[C++ native interop guide](docs/cpp_native_interop.md) for registration, threading,
+lifecycle requirements, and a reproducible Windows validation workflow.
+
 ## Features
 
 ### Supported Platforms

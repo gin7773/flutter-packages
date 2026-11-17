@@ -51,7 +51,16 @@ class CppOptions {
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
+    this.useFfi = false,
+    this.ffiLibraryName,
   });
+
+  /// Whether to generate Windows C++ native interop adapters.
+  final bool useFfi;
+
+  /// The DLL containing the generated adapter's exported symbols.
+  /// Required when [useFfi] is true.
+  final String? ffiLibraryName;
 
   /// The path to the header that will get placed in the source file (example:
   /// "foo.h").
@@ -72,6 +81,8 @@ class CppOptions {
     return CppOptions(
       headerIncludePath: map['headerIncludePath'] as String?,
       namespace: map['namespace'] as String?,
+      useFfi: map['useFfi'] as bool? ?? false,
+      ffiLibraryName: map['ffiLibraryName'] as String?,
       copyrightHeader: map['copyrightHeader'] as Iterable<String>?,
       headerOutPath: map['cppHeaderOut'] as String?,
     );
@@ -83,6 +94,8 @@ class CppOptions {
     final result = <String, Object>{
       if (headerIncludePath != null) 'headerIncludePath': headerIncludePath!,
       if (namespace != null) 'namespace': namespace!,
+      'useFfi': useFfi,
+      if (ffiLibraryName != null) 'ffiLibraryName': ffiLibraryName!,
       if (copyrightHeader != null) 'copyrightHeader': copyrightHeader!,
     };
     return result;
@@ -104,6 +117,8 @@ class InternalCppOptions extends InternalOptions {
     required this.headerIncludePath,
     required this.cppHeaderOut,
     required this.cppSourceOut,
+    this.useFfi = false,
+    this.ffiLibraryName,
     this.namespace,
     this.copyrightHeader,
     this.headerOutPath,
@@ -117,12 +132,20 @@ class InternalCppOptions extends InternalOptions {
     Iterable<String>? copyrightHeader,
   }) : headerIncludePath = options.headerIncludePath ?? path.basename(cppHeaderOut),
        namespace = options.namespace,
+       useFfi = options.useFfi,
+       ffiLibraryName = options.ffiLibraryName,
        copyrightHeader = options.copyrightHeader ?? copyrightHeader,
        headerOutPath = options.headerOutPath;
 
   /// The path to the header that will get placed in the source file (example:
   /// "foo.h").
   final String headerIncludePath;
+
+  /// Whether to generate Windows C++ native interop adapters.
+  final bool useFfi;
+
+  /// The DLL containing the adapter.
+  final String? ffiLibraryName;
 
   /// Path to the ".h" C++ file that will be generated.
   final String cppHeaderOut;

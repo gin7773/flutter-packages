@@ -651,6 +651,8 @@ ${_argParser.usage}''';
       help: 'Path to generated C++ classes file (.cpp).',
       aliases: const <String>['experimental_cpp_source_out'],
     )
+    ..addFlag('cpp_use_ffi', help: 'Generate Windows C++ native interop adapters.')
+    ..addOption('cpp_ffi_library_name', help: 'DLL containing the generated C++ FFI adapter.')
     ..addOption('cpp_namespace', help: 'The namespace that generated C++ code will be in.')
     ..addOption(
       'cpp_header_include_path',
@@ -776,6 +778,8 @@ ${_argParser.usage}''';
       cppHeaderOut: results['cpp_header_out'] as String?,
       cppSourceOut: results['cpp_source_out'] as String?,
       cppOptions: CppOptions(
+        useFfi: results['cpp_use_ffi'] as bool? ?? false,
+        ffiLibraryName: results['cpp_ffi_library_name'] as String?,
         namespace: results['cpp_namespace'] as String?,
         headerIncludePath: results['cpp_header_include_path'] as String?,
         headerOutPath: results['cpp_header_out_path'] as String?,
@@ -884,6 +888,23 @@ ${_argParser.usage}''';
     }
 
     final InternalPigeonOptions internalOptions = InternalPigeonOptions.fromPigeonOptions(options);
+    if (options.cppOptions?.useFfi ?? false) {
+      final paths = <String?>[
+        options.cppHeaderOut,
+        options.cppSourceOut,
+        internalOptions.dartOptions?.dartOut,
+      ];
+      if (paths.any((String? value) => value == null || value.isEmpty || value == 'stdout')) {
+        errors.add(
+          Error(
+            message: 'C++ FFI requires file paths for cppHeaderOut, cppSourceOut, and dartOut.',
+          ),
+        );
+      }
+      if (options.cppOptions?.ffiLibraryName?.isNotEmpty != true) {
+        errors.add(Error(message: 'C++ FFI requires cppOptions.ffiLibraryName.'));
+      }
+    }
 
     for (final adapter in safeGeneratorAdapters) {
       final IOSink? sink = adapter.shouldGenerate(internalOptions, FileType.source);
