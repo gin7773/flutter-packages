@@ -199,9 +199,13 @@ void main() {
     final CppTestApi api = CppTestApi.createWithNativeInteropApi(messageChannelSuffix: 'engine-a');
     try {
       expect(await api.add(1), 101);
+      expect(await api.delayed(42).timeout(const Duration(seconds: 5)), 42);
+      await api.ping();
+      await api.asyncVoid().timeout(const Duration(seconds: 5));
     } finally {
       api.pigeonDispose();
     }
+    await expectLater(api.add(1), throwsStateError);
     const BasicMessageChannel<Object?> channel = BasicMessageChannel<Object?>(
       'dev.flutter.pigeon.cpp_test.CppTestApi.add',
       CppTestApi.pigeonChannelCodec,

@@ -68,6 +68,11 @@ void main() {
     expect(main.toString(), contains('if (dart.library.ffi)'));
     expect(main.toString(), contains('BasicMessageChannel'));
     expect(main.toString(), isNot(contains("import 'dart:ffi'")));
+    expect(main.toString(), contains('if (_nativeInteropApi != null)'));
+    expect(main.toString(), contains('return _nativeInteropApi.add(value);'));
+    expect(main.toString(), contains('return _nativeInteropApi.delayed(value);'));
+    expect(main.toString(), contains('return _nativeInteropApi.ping();'));
+    expect(main.toString(), contains('return _nativeInteropApi.asyncVoid();'));
     final companion = StringBuffer();
     const DartGenerator().generateNativeInterop(
       options,

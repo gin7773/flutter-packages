@@ -3136,8 +3136,7 @@ ${api.name}({
           documentationComments: func.documentationComments,
           channelName: makeChannelName(api, func, dartPackageName),
           addSuffixVariable: true,
-          useJni: generatorOptions.useJni,
-          useFfi: generatorOptions.useFfi,
+          useNativeInterop: usesNativeInterop(generatorOptions),
         );
       }
     });
@@ -4526,14 +4525,13 @@ if (wrapped == null) {
     required List<String> documentationComments,
     required String channelName,
     required bool addSuffixVariable,
-    bool useJni = false,
-    bool useFfi = false,
+    required bool useNativeInterop,
   }) {
     addDocumentationComments(indent, documentationComments, docCommentSpec);
     final String argSignature = _getMethodParameterSignature(parameters);
     indent.write('Future<${addGenericTypes(returnType)}> $name($argSignature) async ');
     indent.addScoped('{', '}', () {
-      if (useJni || useFfi) {
+      if (useNativeInterop) {
         indent.writeScoped('if (_nativeInteropApi != null) {', '}', () {
           indent.writeln(
             'return _nativeInteropApi.$name(${parameters.map((Parameter e) => '${e.isNamed ? '${e.name}: ' : ''}${e.name}').join(', ')});',
