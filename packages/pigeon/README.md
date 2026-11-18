@@ -10,12 +10,10 @@ it removes the need to write custom platform channel or native interop code, sin
 
 For usage examples, see the [Example README](./example/README.md).
 
-Experimental Windows and Linux C++ HostApi native interop is available through
-`CppOptions(useFfi: true, ffiLibraryName: 'your_plugin.dll')` (use the compiled
-`.so` filename on Linux). See the
-[C++ native interop guide](docs/cpp_native_interop.md) for registration, threading,
-lifecycle requirements, and reproducible validation workflows, including the
-[Linux 中文验证步骤](docs/cpp_native_interop_linux_zh.md).
+Experimental C++ HostApi native interop is available through
+`CppOptions(useFfi: true, ffiLibraryName: 'your_plugin.dll')`. See
+[C++ Native Interop](native_interop_guide.md#cpp-native-interop-experimental)
+for build, registration, and lifecycle requirements.
 
 ## Features
 
@@ -24,7 +22,8 @@ lifecycle requirements, and reproducible validation workflows, including the
 Currently pigeon supports generating:
 * Kotlin and Java code for Android
 * Swift and Objective-C code for iOS and macOS
-* C++ code for Windows, and experimental HostApi FFI code for Linux
+* C++ platform channel code for Windows, and experimental HostApi FFI code
+  for native platforms with a compatible C++ library
 * GObject code for Linux
 
 ### Supported Datatypes
@@ -113,7 +112,7 @@ to the api to allow for multiple instances to be created and operate in parallel
 Pigeon supports two distinct models for communication between Dart and native code:
 
 1. **Platform Channels**: The standard Flutter communication model. It serializes data into binary buffers via `StandardMessageCodec` and transmits them asynchronously over platform channels.
-2. **Native Interop (Direct FFI & JNI) \*Preview\***: A direct, memory-bound function call model utilizing Dart FFI (for Swift/Objective-C on iOS/macOS) and JNI (for Kotlin/Java on Android).
+2. **Native Interop (Direct FFI & JNI) \*Preview\***: A direct, memory-bound function call model utilizing Dart FFI (for Swift/Objective-C on iOS/macOS and C++ Host APIs) and JNI (for Kotlin/Java on Android).
 
 > [!WARNING]
 > Swift/JNI Native Interop associates each registration with the `FlutterEngine` that made it, but in apps
@@ -143,7 +142,7 @@ Pigeon supports two distinct models for communication between Dart and native co
 | Feature | Platform Channels | Native Interop |
 | :--- | :--- | :--- |
 | **Communication Mechanism** | Asynchronous message passing over platform channels | Direct memory-bound function calls (Dart FFI / JNI) |
-| **Platform Support** | All supported platforms (Android, iOS, macOS, Windows, Linux) | Android, iOS, macOS; experimental C++ HostApi on Windows and Linux |
+| **Platform Support** | All supported platforms (Android, iOS, macOS, Windows, Linux) | Android (JNI), iOS/macOS (Swift FFI); C++ HostApi requires a compatible native library |
 | **Threading Model** | Main UI thread or custom background `TaskQueue` | Direct execution on caller thread (`TaskQueue` is not supported) |
 | **Dart Isolate Support** | Requires `BackgroundIsolateBinaryMessenger` | Supported for Host APIs |
 | **Serialization Overhead** | Every value is encoded into one message and copied | Scalars, strings, enums and typed data cross directly; data classes, lists and maps are encoded into one buffer per call |

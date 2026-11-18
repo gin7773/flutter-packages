@@ -81,33 +81,52 @@ void main() {
       dartPackageName: 'cpp_test',
     );
     expect(companion.toString(), contains('implements CppTestApiForNativeInterop'));
-    expect(companion.toString(), contains('if (Platform.isWindows || Platform.isLinux)'));
+    expect(companion.toString(), contains('return _CppTestApiForCppNativeInterop(channelName);'));
+    expect(companion.toString(), isNot(contains('Platform.')));
+    expect(companion.toString(), isNot(contains("import 'dart:io'")));
+    expect(companion.toString(), isNot(contains('UnsupportedError')));
     expect(companion.toString(), contains('NativeCallable<_CppReplyNative>.listener'));
     expect(companion.toString(), contains('void pigeonDispose() => _session.dispose()'));
     parseString(content: main.toString());
     parseString(content: companion.toString());
-    final mixedCompanion = StringBuffer();
-    const DartGenerator().generateNativeInterop(
-      const InternalDartOptions(
-        dartOut: 'messages.dart',
-        cppFfiLibraryName: 'libtest.so',
-        useFfi: true,
-        useJni: true,
-        ffiErrorClassName: 'PigeonError',
-        jniErrorClassName: 'FlutterError',
-        ignoreLints: true,
-      ),
-      root,
-      mixedCompanion,
-      dartPackageName: 'cpp_test',
-    );
-    parseString(content: mixedCompanion.toString());
-    expect(mixedCompanion.toString(), contains("'./messages.cpp_ffi.dart'"));
-    expect(mixedCompanion.toString(), contains("'./messages.ffi.dart'"));
-    expect(mixedCompanion.toString(), contains("'./messages.jni.dart'"));
-    expect(mixedCompanion.toString(), contains('if (Platform.isWindows || Platform.isLinux)'));
-    expect(mixedCompanion.toString(), contains("DynamicLibrary.open('libtest.so')"));
   });
+
+  for (final (useFfi, useJni) in <(bool, bool)>[(true, false), (false, true), (true, true)]) {
+    test('C++ complements configured Swift/JNI backends (Swift: $useFfi, JNI: $useJni)', () {
+      final ParseResults parsed = Pigeon.setup().parseFile('test/fixtures/cpp_native_interop.dart');
+      expect(parsed.errors, isEmpty);
+      final companion = StringBuffer();
+      const DartGenerator().generateNativeInterop(
+        InternalDartOptions(
+          dartOut: 'messages.dart',
+          cppFfiLibraryName: 'libtest.so',
+          useFfi: useFfi,
+          useJni: useJni,
+          ffiErrorClassName: 'PigeonError',
+          jniErrorClassName: 'FlutterError',
+          ignoreLints: true,
+        ),
+        parsed.root,
+        companion,
+        dartPackageName: 'cpp_test',
+      );
+      final code = companion.toString();
+      parseString(content: code);
+      expect(code, contains("'./messages.cpp_ffi.dart'"));
+      expect(code.contains("'./messages.ffi.dart'"), useFfi);
+      expect(code.contains("'./messages.jni.dart'"), useJni);
+      expect(code.contains('if (Platform.isIOS || Platform.isMacOS)'), useFfi);
+      expect(code.contains('if (Platform.isAndroid)'), useJni);
+      expect(code, isNot(contains('Platform.isWindows')));
+      expect(code, isNot(contains('Platform.isLinux')));
+      expect(code, isNot(contains('UnsupportedError')));
+      expect(
+        code,
+        matches(RegExp(r'\} else \{\s+return _CppTestApiForCppNativeInterop\(channelName\);\s+\}')),
+      );
+      expect(code, contains("DynamicLibrary.open('libtest.so')"));
+    });
+  }
 
   test('C++ FFI symbols preserve case and API/method boundaries', () {
     expect(cppFfiPrefix('test', r'C:\one\Messages.h'), cppFfiPrefix('test', '/two/Messages.h'));

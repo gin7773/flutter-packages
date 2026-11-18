@@ -155,7 +155,7 @@ if $multi_engine; then
   fi
   app="$generated/engine_app_linux"
   if [[ ! -f $app/pubspec.yaml ]]; then
-    "$flutter" create --platforms=linux,web --project-name=cpp_engine_test "$app"
+    "$flutter" create --platforms=linux --project-name=cpp_engine_test "$app"
   fi
   cd "$app"
   "$flutter" pub add ffi

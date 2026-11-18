@@ -651,7 +651,7 @@ ${_argParser.usage}''';
       help: 'Path to generated C++ classes file (.cpp).',
       aliases: const <String>['experimental_cpp_source_out'],
     )
-    ..addFlag('cpp_use_ffi', help: 'Generate Windows/Linux C++ native interop adapters.')
+    ..addFlag('cpp_use_ffi', help: 'Generate C++ native interop adapters.')
     ..addOption('cpp_ffi_library_name', help: 'Shared library containing the C++ FFI adapter.')
     ..addOption('cpp_namespace', help: 'The namespace that generated C++ code will be in.')
     ..addOption(

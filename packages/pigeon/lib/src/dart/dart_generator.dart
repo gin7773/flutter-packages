@@ -907,7 +907,9 @@ class DartGenerator extends StructuredGenerator<InternalDartOptions> {
     if (generatorOptions.useFfi) {
       indent.writeln("import 'dart:ffi';");
     }
-    indent.writeln("import 'dart:io' show Platform;");
+    if (generatorOptions.useFfi || generatorOptions.useJni) {
+      indent.writeln("import 'dart:io' show Platform;");
+    }
 
     final typedDataClasses = <String>[
       'Float32List',
@@ -2180,12 +2182,7 @@ static ${api.name} implement(${api.name} api, {
       indent.writeln(
         '$dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({String channelName = defaultInstanceName}) {',
       );
-      indent.writeln(
-        'if (Platform.isWindows || Platform.isLinux) { return _${api.name}ForCppNativeInterop(channelName); }',
-      );
-      indent.writeln(
-        "throw UnsupportedError('C++ native interop is supported on Windows and Linux only.');",
-      );
+      indent.writeln('return _${api.name}ForCppNativeInterop(channelName);');
       indent.writeln('}');
       return;
     }
@@ -2293,11 +2290,6 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
         'static $dartApiName? getInstance({String channelName = defaultInstanceName}) {',
         '}',
         () {
-          if (generatorOptions.cppFfiLibraryName != null) {
-            indent.writeln(
-              'if (Platform.isWindows || Platform.isLinux) { return _${api.name}ForCppNativeInterop(channelName); }',
-            );
-          }
           var isFirst = true;
           if (generatorOptions.useJni) {
             indent.writeScoped('if (Platform.isAndroid) {', '}', () {
@@ -2349,9 +2341,13 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
           }
           if (!isFirst) {
             indent.addScoped(' else {', '}', () {
-              indent.writeln(
-                "throw UnsupportedError('Native Interop is not supported on this platform. Use ${api.name} instead.');",
-              );
+              if (generatorOptions.cppFfiLibraryName != null) {
+                indent.writeln('return _${api.name}ForCppNativeInterop(channelName);');
+              } else {
+                indent.writeln(
+                  "throw UnsupportedError('Native Interop is not supported on this platform. Use ${api.name} instead.');",
+                );
+              }
             });
           } else {
             indent.writeln(

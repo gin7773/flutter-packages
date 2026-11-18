@@ -47,6 +47,55 @@ For local testing, always use `test.dart` rather than `run_tests.dart`, as
 generator, you will likely want to use the `-t` flag to specific only the
 relevant tests. Pass `-l` to get a list of available tests for the `-t` flag.
 
+### Testing C++ native interop
+
+The C++ backend has standalone Windows and Linux harnesses in `tool/`, using
+the shared fixture in `test/fixtures/cpp_native_interop.dart` and runners in
+`platform_tests/test_plugin/test/cpp_native_interop/`. These are not yet part of
+the normal CI shards; run them in addition to the existing generator and
+platform tests. The required host toolchains are:
+
+* Linux: Flutter with Linux desktop support, CMake, a C++17 compiler, Ninja,
+  GTK development libraries, LLVM/libclang, and Git. Headless engine tests also
+  require `xvfb-run` and working GTK/OpenGL support.
+* Windows x64: Flutter with Windows desktop support, Visual Studio's Desktop
+  development with C++ workload, CMake/CTest on PATH, and LLVM/libclang.
+
+Use a Flutter SDK with `PlatformDispatcher.engineId` and the desktop UI thread
+policy APIs. From `packages/pigeon`, run both configurations:
+
+```sh
+bash tool/test_cpp_native_interop.sh --configuration Debug --multi-engine
+bash tool/test_cpp_native_interop.sh --configuration Release --multi-engine
+```
+
+The Linux script discovers Flutter from `FLUTTER_ROOT` or PATH and LLVM from
+`llvm-config`, `/usr/lib/llvm-*`, or ffigen defaults. Use `--flutter-sdk`,
+`--llvm-path`, or `--flutter-wrapper-dir` to override discovery. If the common
+C++ wrapper sources are missing, it fetches them at the SDK's exact Git revision
+into the ignored build directory.
+
+On Windows, run these commands in Developer PowerShell, replacing the SDK paths:
+
+```powershell
+.\tool\test_cpp_native_interop.ps1 -FlutterSdk C:\src\flutter -LlvmDirectory 'C:\Program Files\LLVM' -Configuration Debug -MultiEngine
+.\tool\test_cpp_native_interop.ps1 -FlutterSdk C:\src\flutter -LlvmDirectory 'C:\Program Files\LLVM' -Configuration Release -MultiEngine
+```
+
+Each script generates the adapters and FFIgen bindings, builds the native
+library, runs CTest and the Flutter runtime tests, then creates a temporary
+desktop app under `platform_tests/test_plugin/build/cpp_native_interop/`.
+The engine runner exercises simultaneous engines, background isolates, and
+replacement of engine A by A2 while B continues calling. It repeats with UI
+and platform threads merged and separate. Release exercises Dart AOT.
+
+Success requires CTest and all Flutter tests to pass, plus a
+`PASS: two [Linux] engines, <configuration>, <thread-policy>` summary for each
+configuration and each of `--platform-ui` and `--separate-ui`. The individual
+A, A2, and B lines are intermediate results. Reports are saved below
+`build/cpp_native_interop/reports/` in the test plugin; retain those reports,
+console output, SDK version, and the tested commit when reporting failures.
+
 ## Generated Source Code Example
 
 This is what the temporary generated code that the _PigeonIsolate_ executes

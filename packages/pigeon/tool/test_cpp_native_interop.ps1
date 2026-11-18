@@ -55,7 +55,7 @@ try {
   if ($MultiEngine) {
     $taskApp = Join-Path $taskGenerated 'engine_app'
     if (!(Test-Path -LiteralPath "$taskApp/pubspec.yaml")) {
-      Invoke-Checked $taskFlutter @('create', '--platforms=windows,web', '--project-name=cpp_engine_test', $taskApp)
+      Invoke-Checked $taskFlutter @('create', '--platforms=windows', '--project-name=cpp_engine_test', $taskApp)
     }
     Set-Location -LiteralPath $taskApp
     Invoke-Checked $taskFlutter @('pub', 'add', 'ffi')

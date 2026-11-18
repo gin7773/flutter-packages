@@ -1,7 +1,10 @@
 <?code-excerpt path-base="."?>
 # Pigeon Native Interop (FFI & JNI) Guide
 
-This guide describes Pigeon's Native Interop feature, which allows for direct, high-performance communication between Dart and native code using **FFI (Foreign Function Interface)** for Swift (iOS/macOS) and **JNI (Java Native Interface)** for Kotlin (Android).
+This guide describes Pigeon's Native Interop feature, which allows for direct, high-performance communication between Dart and native code using **FFI (Foreign Function Interface)** for Swift (iOS/macOS) and C++, and **JNI (Java Native Interface)** for Kotlin (Android).
+
+The Swift/JNI workflow and engine-aware registration are described below. For
+the experimental C++ HostApi backend, see [C++ Native Interop](#cpp-native-interop-experimental).
 
 ---
 
@@ -314,6 +317,132 @@ Native Interop looks up instances directly in process memory rather than through
 Native `@FlutterApi` lookups by engine (`getInstance(binding)` / `getInstance(flutterEngine)` / `getInstance(registrar:)`) find that engine's Dart registration when the registering isolate either has an engine identifier native code can match, or has resolved a `@HostApi` handle from that engine that is defined in the same Pigeon input file. The `@FlutterApi` can be registered before or after that `@HostApi` handle is resolved. A Pigeon file that defines only `@FlutterApi`s can't learn its engine this way, so without an exact engine identifier its lookups fall back to the most recent registration.
 
 A Dart `<Api>` created with `createWithNativeInteropApi()` stays bound to the instance it resolved for its lifetime: later registrations don't change which instance it calls, and if that instance is unregistered (for example, because its engine detached), calls through the existing object throw a `PlatformException` with code `unregistered-instance` rather than switching to another registered instance. Stateless or process-wide plugins work across any number of engines. If an API holds **engine-specific state** (such as an Android `Activity` from `ActivityAware`, a per-engine `TextureRegistry`, or a specific `UIViewController`) and you can't rely on exact routing, pass a distinct `name` / `messageChannelSuffix` per engine or keep engine-scoped operations on platform channels / `@ProxyApi`.
+
+---
+
+### C++ Native Interop (Experimental)
+
+C++ implements the same `<Api>ForNativeInterop` interface and hybrid transport
+as Swift/JNI. The normal `<Api>` constructor continues to use platform channels.
+Only Host APIs are supported: FlutterApi, EventChannelApi, ProxyApi, custom
+TaskQueues, and the legacy `objects` transport are rejected during generation.
+
+#### Generation and host build
+
+Configure the existing C++ generator with the name of the library that the host
+build will produce:
+
+```dart
+@ConfigurePigeon(PigeonOptions(
+  dartOut: 'lib/messages.dart',
+  cppHeaderOut: 'native/messages.h',
+  cppSourceOut: 'native/messages.cpp',
+  cppOptions: CppOptions(
+    namespace: 'my_plugin',
+    useFfi: true,
+    ffiLibraryName: 'my_plugin.dll',
+  ),
+))
+```
+
+Add `ffi` to the consuming package's dependencies and `ffigen` to its dev
+dependencies, then generate the bridge and bindings:
+
+```sh
+dart run pigeon --input pigeons/messages.dart
+dart run ffigen --config native/messages.ffigen.yaml
+```
+
+Pigeon adds `messages.ffi.h`, `messages.ffi.cpp`, and `messages.ffigen.yaml`
+beside the normal C++ outputs, and `messages.native_interop.dart` beside the
+Dart output. FFIgen produces `lib/messages.cpp_ffi.dart`. Configure `llvm-path`
+in the generated YAML if LLVM is not discoverable.
+
+The host build compiles both `messages.cpp` and `messages.ffi.cpp` using C++17
+with exceptions enabled (`/EHsc` and `_HAS_EXCEPTIONS=1` for MSVC). Supply
+Flutter's common C++ client wrapper headers and `standard_codec.cc`, and link
+the platform's thread library. Use a distinct C++ namespace for each generated
+definition in the same library to avoid exported symbol collisions.
+
+`ffiLibraryName` is passed to `DynamicLibrary.open`, so it must identify the
+packaged library (for example, `my_plugin.dll` on Windows or `libmy_plugin.so`
+on Linux). Building, packaging, and making it discoverable are the host's
+responsibility. The generator has no native operating-system allowlist;
+the available runtime test harnesses cover Windows and Linux. Other host
+toolchains and packaging arrangements still need validation. The Linux FFI
+adapter uses the common C++ wrapper, not GObject; the generated C++ platform
+channel `SetUp` cannot accept an `FlBinaryMessenger`.
+
+When C++ is the only configured backend, native callers use it directly. When
+the same definition also enables Kotlin JNI or Swift FFI, JNI handles Android
+and Swift handles iOS/macOS; C++ handles the remaining native platforms. A
+missing library or registration reports an error rather than switching to
+another backend. The shared conditional import keeps the normal channel API
+usable on web; native interop itself requires `dart:ffi`.
+
+#### Registration and lifetime
+
+```cpp
+// The plugin owns the implementation and retains the registration token.
+registration_id_ = my_plugin::RegisterExampleApiFfi(api_.get(), "engine-a");
+
+// On teardown, unregister before destroying the implementation.
+my_plugin::UnregisterExampleApiFfi(registration_id_);
+api_->StopAndJoin();  // Application-specific: finish implementation-owned work.
+api_.reset();
+```
+
+```dart
+final api = ExampleApiForNativeInterop.getInstance(channelName: 'engine-a')!;
+try {
+  final value = api.synchronousMethod();
+  await api.asynchronousMethod();
+} finally {
+  api.pigeonDispose();
+}
+```
+
+Use `ExampleApi.createWithNativeInteropApi(messageChannelSuffix: 'engine-a')`
+to retain the normal Future-based API, and dispose that wrapper when finished.
+An injected interop instance is shared by reference; disposing a wrapper also
+disposes its injected instance. Each separate `getInstance` creates an
+independently disposable session without taking ownership of the implementation.
+
+Unlike Swift/JNI's engine-aware registrars, C++ currently uses explicit names.
+For engine-specific state, register a distinct name per engine and pass it to
+the corresponding Dart entrypoint and background isolates. Duplicate names
+are rejected. For shared state, register once and connect each engine using
+that name; the implementation must support concurrent calls and outlive them.
+Unregistering and re-registering a name never redirects existing sessions to
+the replacement. The registration token also prevents delayed cleanup from
+removing a newer registration with the same name.
+
+#### Threads and memory
+
+* Both synchronous and asynchronous methods enter on the calling isolate's
+  native thread. There is no generated dispatcher. Synchronous methods must
+  be short and valid on that thread; asynchronous implementations must schedule
+  thread-affine work themselves and return promptly. `@async` alone does not
+  switch threads. Avoid blocking waits between mutually dependent threads.
+* Input references are borrowed for the duration of the native entry. Copy
+  referenced inputs before retaining them for asynchronous work. Native results
+  are freed after Dart copies or decodes them; the transport is not zero-copy.
+* Unregister waits for active entries and callback posts, cancels pending
+  replies, and prevents new entries. It does not join implementation-owned
+  workers. Unregistering from inside an active call is rejected to avoid a
+  self-deadlock.
+* Dispose Dart sessions before isolate or engine shutdown, and unregister and
+  stop native work before destroying the implementation. Keep the library
+  loaded while sessions, native work, or queued replies exist. Pending calls
+  keep an isolate alive until completion or disposal; applications own timeouts
+  for work that never completes.
+* Disposal fences native callback posts, but does not synchronously drain
+  already queued Dart replies. Forced isolate termination can discard replies
+  that own native buffers. Await all asynchronous calls before returning from
+  `Isolate.run`; forcibly killing an isolate with live callbacks is unsupported.
+
+See [Testing C++ native interop](CONTRIBUTING.md#testing-c-native-interop)
+for the native and real-engine test harnesses.
 
 ---
 
