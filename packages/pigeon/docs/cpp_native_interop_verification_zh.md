@@ -2,6 +2,9 @@
 
 更新日期：2026-11-17。本说明对应 `gin7773/flutter-packages` 的迁移分支，适用于在另一台 Windows x64 机器上验证。
 
+**Linux 请使用 [Linux 完整中文验证步骤](cpp_native_interop_linux_zh.md)。**
+本页的 `.ps1` 是 Windows PowerShell 脚本，不能交给 Bash 执行；转换换行符也不能把它变成 Linux 脚本。
+
 - 仓库：<https://github.com/gin7773/flutter-packages>
 - 分支：`work/pigeon-cpp-native-interop`
 - 官方基线：`65301abeb0a77968c58c072a5560df443846e369`
@@ -97,7 +100,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Dart 单元测试失败，请保留输出。' 
 | CTest | `cpp_native_interop` 通过，当前原生测试为 38 项检查 |
 | Flutter 运行测试 | 5 项全部通过，没有超时或未捕获错误 |
 | 双引擎 | 出现 4 行 `PASS: two engines, ...`，覆盖两个构建配置和两个线程模式 |
-| A / A2 / B 报告 | 都以 PASS 开头，不同引擎的 engineId 不同 |
+| A / A2 / B 报告 | 都以 PASS 开头，同时运行的 A/B、A2/B 的 engineId 不同；已销毁的 A 的标识可以被 A2 复用 |
 | 隔离 | A 得到 100+输入，B 始终得到 200+输入，替换后的 A2 得到 300+输入 |
 | 生命周期 | 旧 session 失效、释放一个共享 session 不影响另一个、注销后迟到回复不会再次执行 |
 

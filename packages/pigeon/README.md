@@ -10,10 +10,12 @@ it removes the need to write custom platform channel or native interop code, sin
 
 For usage examples, see the [Example README](./example/README.md).
 
-Experimental Windows C++ HostApi native interop is available through
-`CppOptions(useFfi: true, ffiLibraryName: 'your_plugin.dll')`. See the
+Experimental Windows and Linux C++ HostApi native interop is available through
+`CppOptions(useFfi: true, ffiLibraryName: 'your_plugin.dll')` (use the compiled
+`.so` filename on Linux). See the
 [C++ native interop guide](docs/cpp_native_interop.md) for registration, threading,
-lifecycle requirements, and a reproducible Windows validation workflow.
+lifecycle requirements, and reproducible validation workflows, including the
+[Linux 中文验证步骤](docs/cpp_native_interop_linux_zh.md).
 
 ## Features
 
@@ -22,7 +24,7 @@ lifecycle requirements, and a reproducible Windows validation workflow.
 Currently pigeon supports generating:
 * Kotlin and Java code for Android
 * Swift and Objective-C code for iOS and macOS
-* C++ code for Windows
+* C++ code for Windows, and experimental HostApi FFI code for Linux
 * GObject code for Linux
 
 ### Supported Datatypes
@@ -114,7 +116,7 @@ Pigeon supports two distinct models for communication between Dart and native co
 2. **Native Interop (Direct FFI & JNI) \*Preview\***: A direct, memory-bound function call model utilizing Dart FFI (for Swift/Objective-C on iOS/macOS) and JNI (for Kotlin/Java on Android).
 
 > [!WARNING]
-> Native Interop associates each registration with the `FlutterEngine` that made it, but in apps
+> Swift/JNI Native Interop associates each registration with the `FlutterEngine` that made it, but in apps
 > that run multiple engines, routing on an engine's root isolate is only exact when the engine
 > identifier is available to native code (always for Kotlin `register(api, flutterEngine)`; for
 > plugin bindings and registrars, only on Flutter versions that expose it). See
@@ -141,19 +143,19 @@ Pigeon supports two distinct models for communication between Dart and native co
 | Feature | Platform Channels | Native Interop |
 | :--- | :--- | :--- |
 | **Communication Mechanism** | Asynchronous message passing over platform channels | Direct memory-bound function calls (Dart FFI / JNI) |
-| **Platform Support** | All supported platforms (Android, iOS, macOS, Windows, Linux) | Android, iOS, and macOS |
+| **Platform Support** | All supported platforms (Android, iOS, macOS, Windows, Linux) | Android, iOS, macOS; experimental C++ HostApi on Windows and Linux |
 | **Threading Model** | Main UI thread or custom background `TaskQueue` | Direct execution on caller thread (`TaskQueue` is not supported) |
 | **Dart Isolate Support** | Requires `BackgroundIsolateBinaryMessenger` | Supported for Host APIs |
 | **Serialization Overhead** | Every value is encoded into one message and copied | Scalars, strings, enums and typed data cross directly; data classes, lists and maps are encoded into one buffer per call |
 | **Latency** | Higher (requires message loop scheduling) | Extremely low (direct execution) |
 | **Synchronous Host Calls** | Not supported | Fully supported |
 | **Setup Complexity** | Simple | Complex (requires external tools) |
-| **Code Generation Steps** | Single-step (running Pigeon generates everything) | Multi-step (running Pigeon automatically runs the generated config scripts) |
+| **Code Generation Steps** | Single-step (running Pigeon generates everything) | Multi-step (C++ requires an explicit ffigen step) |
 
 #### When to Choose Which Model
 
 - **Consider Platform Channels if**:
-  - Your plugin targets Windows or Linux (Native Interop is not supported on these platforms, though you can generate platform channel code for them from the same pigeon file alongside Native Interop).
+  - Your Windows or Linux plugin needs features outside the experimental C++ HostApi backend, such as FlutterApi or automatic engine routing.
   - Your plugin primarily passes simple data objects or has low-frequency communication.
   - You want a simpler setup with no external dependencies or additional command-line tools.
 - **Consider Native Interop if**:

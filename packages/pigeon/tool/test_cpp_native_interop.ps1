@@ -9,6 +9,9 @@ param(
   [switch]$MultiEngine
 )
 $ErrorActionPreference = 'Stop'
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+  throw 'This script requires Windows. On Linux, use: bash tool/test_cpp_native_interop.sh --configuration Debug --multi-engine'
+}
 $taskPigeon = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $taskFlutter = Join-Path $FlutterSdk 'bin/flutter.bat'
 $taskDart = Join-Path $FlutterSdk 'bin/dart.bat'

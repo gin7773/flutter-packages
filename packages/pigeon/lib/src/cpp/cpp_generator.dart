@@ -55,10 +55,10 @@ class CppOptions {
     this.ffiLibraryName,
   });
 
-  /// Whether to generate Windows C++ native interop adapters.
+  /// Whether to generate Windows/Linux C++ native interop adapters.
   final bool useFfi;
 
-  /// The DLL containing the generated adapter's exported symbols.
+  /// The shared library containing the generated adapter's exported symbols.
   /// Required when [useFfi] is true.
   final String? ffiLibraryName;
 
@@ -141,10 +141,10 @@ class InternalCppOptions extends InternalOptions {
   /// "foo.h").
   final String headerIncludePath;
 
-  /// Whether to generate Windows C++ native interop adapters.
+  /// Whether to generate Windows/Linux C++ native interop adapters.
   final bool useFfi;
 
-  /// The DLL containing the adapter.
+  /// The shared library containing the adapter.
   final String? ffiLibraryName;
 
   /// Path to the ".h" C++ file that will be generated.

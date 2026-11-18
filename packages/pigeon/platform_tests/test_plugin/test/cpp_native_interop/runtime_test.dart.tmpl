@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -13,7 +14,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'messages.dart';
 
-final DynamicLibrary _library = DynamicLibrary.open('pigeon_cpp_test.dll');
+final DynamicLibrary _library = DynamicLibrary.open(
+  Platform.isWindows ? 'pigeon_cpp_test.dll' : 'libpigeon_cpp_test.so',
+);
 final int Function(Pointer<Uint8>, int, int) _register = _library
     .lookupFunction<
       Int64 Function(Pointer<Uint8>, UintPtr, Int64),

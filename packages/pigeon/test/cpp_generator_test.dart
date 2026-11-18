@@ -76,7 +76,7 @@ void main() {
       dartPackageName: 'cpp_test',
     );
     expect(companion.toString(), contains('implements CppTestApiForNativeInterop'));
-    expect(companion.toString(), contains('if (Platform.isWindows)'));
+    expect(companion.toString(), contains('if (Platform.isWindows || Platform.isLinux)'));
     expect(companion.toString(), contains('NativeCallable<_CppReplyNative>.listener'));
     expect(companion.toString(), contains('void pigeonDispose() => _session.dispose()'));
     parseString(content: main.toString());
@@ -85,7 +85,7 @@ void main() {
     const DartGenerator().generateNativeInterop(
       const InternalDartOptions(
         dartOut: 'messages.dart',
-        cppFfiLibraryName: 'test.dll',
+        cppFfiLibraryName: 'libtest.so',
         useFfi: true,
         useJni: true,
         ffiErrorClassName: 'PigeonError',
@@ -100,6 +100,8 @@ void main() {
     expect(mixedCompanion.toString(), contains("'./messages.cpp_ffi.dart'"));
     expect(mixedCompanion.toString(), contains("'./messages.ffi.dart'"));
     expect(mixedCompanion.toString(), contains("'./messages.jni.dart'"));
+    expect(mixedCompanion.toString(), contains('if (Platform.isWindows || Platform.isLinux)'));
+    expect(mixedCompanion.toString(), contains("DynamicLibrary.open('libtest.so')"));
   });
 
   test('C++ FFI symbols preserve case and API/method boundaries', () {

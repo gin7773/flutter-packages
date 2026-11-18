@@ -792,7 +792,7 @@ class InternalDartOptions extends InternalOptions {
   /// Whether to use FFI for generating Swift interop code.
   final bool useFfi;
 
-  /// DLL containing an optional C++ native interop implementation.
+  /// Shared library containing an optional C++ native interop implementation.
   final String? cppFfiLibraryName;
 
   /// The error class name used for FFI methods.
@@ -2181,9 +2181,11 @@ static ${api.name} implement(${api.name} api, {
         '$dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({String channelName = defaultInstanceName}) {',
       );
       indent.writeln(
-        'if (Platform.isWindows) { return _${api.name}ForCppNativeInterop(channelName); }',
+        'if (Platform.isWindows || Platform.isLinux) { return _${api.name}ForCppNativeInterop(channelName); }',
       );
-      indent.writeln("throw UnsupportedError('C++ native interop is supported on Windows only.');");
+      indent.writeln(
+        "throw UnsupportedError('C++ native interop is supported on Windows and Linux only.');",
+      );
       indent.writeln('}');
       return;
     }
@@ -2293,7 +2295,7 @@ $dartApiName? ${classMemberNamePrefix}getInstance_${api.name}({
         () {
           if (generatorOptions.cppFfiLibraryName != null) {
             indent.writeln(
-              'if (Platform.isWindows) { return _${api.name}ForCppNativeInterop(channelName); }',
+              'if (Platform.isWindows || Platform.isLinux) { return _${api.name}ForCppNativeInterop(channelName); }',
             );
           }
           var isFirst = true;

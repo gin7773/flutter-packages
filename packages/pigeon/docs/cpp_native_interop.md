@@ -1,16 +1,17 @@
-# Experimental C++ native interop (Windows)
+# Experimental C++ native interop (Windows and Linux)
 
-For step-by-step verification from GitHub on another Windows machine, see the
-[中文验证步骤](cpp_native_interop_verification_zh.md).
+For step-by-step verification from GitHub, see the
+[Windows 中文验证步骤](cpp_native_interop_verification_zh.md) or
+[Linux 中文验证步骤](cpp_native_interop_linux_zh.md).
 
 This backend implements the existing `HostApiForNativeInterop` interface. The
 normal `HostApi` class and its Platform Channel constructor remain available.
 It supports synchronous and asynchronous HostApi methods, including
 `@asyncCallback`, using the shared hybrid transport classification.
 
-This is an initial Windows implementation. FlutterApi, EventChannelApi, ProxyApi,
-custom TaskQueues, and the legacy `objects` transport are rejected. Linux support,
-automatic engine discovery, and integration into the repository's CI shards are
+This is an experimental Windows and Linux implementation. FlutterApi,
+EventChannelApi, ProxyApi, custom TaskQueues, and the legacy `objects` transport
+are rejected. Automatic engine discovery and integration into the repository's CI shards are
 separate follow-up work. The validation steps below must pass before proposing
 this implementation for upstream review.
 
@@ -48,9 +49,41 @@ HostApi definition can also enable Swift FFI and Kotlin JNI.
 
 Add **both** `messages.cpp` and `messages.ffi.cpp` to the plugin's CMake sources.
 Use C++17 with exceptions enabled (`/EHsc` and `_HAS_EXCEPTIONS=1` for MSVC).
-The DLL name must match the compiled plugin DLL. Use a distinct C++ namespace
-for each generated definition in the same DLL; exported names include the
+The library name must match the compiled shared library (`.dll` on Windows,
+`.so` on Linux). Use a distinct C++ namespace
+for each generated definition in the same library; exported names include the
 package, namespace, header basename, API, and method.
+
+On Linux, set `ffiLibraryName` to the exact library name, for example
+`libmy_plugin.so`, and use Linux output paths. The C++ FFI backend uses Flutter's
+common C++ client wrapper headers and `standard_codec.cc`; link those sources
+and the platform's thread library into the shared library. It does not use the
+Linux GObject generator. Existing Linux Platform Channel implementations still
+use GObject; the generated C++ `SetUp` method cannot take an `FlBinaryMessenger`.
+
+## Linux verification
+
+From `packages/pigeon`, with Flutter on PATH and the Linux desktop toolchain:
+
+```bash
+bash tool/test_cpp_native_interop.sh --configuration Debug --multi-engine
+bash tool/test_cpp_native_interop.sh --configuration Release --multi-engine
+```
+
+The script discovers Flutter from `FLUTTER_ROOT` or PATH, and LLVM from
+`llvm-config`, `/usr/lib/llvm-*`, or ffigen's defaults. Optional overrides are
+`--flutter-sdk`, `--llvm-path`, and `--flutter-wrapper-dir`. If the common C++
+wrapper sources are absent, it downloads that directory from the official
+Flutter repository at the SDK's exact Git revision into the ignored build tree.
+
+The harness builds a `.so` and runs the same native and Flutter fixtures as on
+Windows. With `--multi-engine`, it builds a GTK app and creates independent
+engines through `fl_view_new`, testing both UI thread policies and replacement
+of one engine while the other keeps calling. On a machine without a display it
+uses `xvfb-run`; a functioning GTK/OpenGL environment is still needed. The
+Release app exercises AOT. Reports are saved under
+`platform_tests/test_plugin/build/cpp_native_interop/reports/linux/<configuration>/<thread-policy>/`.
+See the Linux guide for dependencies, expected results, web checks, and logs.
 
 ## Registration, sessions, and ownership
 
@@ -121,7 +154,7 @@ dedicated runner below creates two `FlutterEngine` objects in one process.
 - Dispose Dart sessions before an isolate exits or an engine shuts down. For a
   forced shutdown, native unregistration and worker shutdown must occur first.
   Abruptly killing an isolate with live native callbacks is unsupported.
-- Keep the DLL loaded while sessions, native work, or queued replies exist.
+- Keep the shared library loaded while sessions, native work, or queued replies exist.
   Never unload it immediately after posting an asynchronous reply.
 
 The runtime fences callback posts during disposal and suppresses duplicate or
@@ -139,9 +172,8 @@ case requires an asynchronous drain protocol and is outside this initial backend
 
 ## Reproducing the verification on another Windows machine
 
-Copy this local branch to that machine, including the commit containing this
-document. No push is required: a Git bundle, or a copy of the entire checkout,
-can be used. A plain diff must include newly added files.
+Fetch `work/pigeon-cpp-native-interop` from the fork, or copy the entire checkout
+to that machine. Record the commit being tested.
 
 Prerequisites:
 
@@ -211,7 +243,7 @@ Expected results:
 | Native CTest | `cpp_native_interop` passes; executable prints its check count |
 | Flutter tests | All 5 tests pass without a timeout or uncaught error |
 | Engine runner | `PASS: two engines, Debug/Release, --platform-ui/--separate-ui` |
-| Engine report files | A, A2, and B all start with `PASS`; distinct engines have distinct IDs |
+| Engine report files | A, A2, and B all start with `PASS`; concurrently running engines have distinct IDs |
 | Engine B during replacement | Always gets its own `200 + value` result |
 | Replacement A2 | Gets `300 + value`; old sessions fail instead of reconnecting |
 
@@ -276,10 +308,10 @@ dart run script/tool/bin/flutter_plugin_tools.dart publish-check --packages=pige
 
 The remaining upstream preparation includes:
 
-- Integrate generation, native tests, and Windows integration tests into the
+- Integrate generation, native tests, and Windows/Linux integration tests into the
   repository's normal generation/test suites, and review the public lifecycle API.
 - Run the full Flutter/native package checks on an equipped machine, including
-  generation consistency and the existing Windows platform tests.
+  generation consistency and the existing platform tests.
 - Run a sustained attach/call/dispose/detach loop with MSVC AddressSanitizer or
   equivalent memory diagnostics; retain crash and leak reports.
 - Benchmark against Platform Channels in the **same Release/AOT application**,
