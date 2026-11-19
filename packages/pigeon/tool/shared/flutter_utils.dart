@@ -5,7 +5,32 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 String getFlutterCommand() => Platform.isWindows ? 'flutter.bat' : 'flutter';
+
+/// Finds the SDK used by the test tools without requiring a machine-specific path.
+String getFlutterSdkPath() {
+  final String dartSdk = p.dirname(p.dirname(Platform.resolvedExecutable));
+  final candidates = <String>[
+    if (Platform.environment['FLUTTER_ROOT'] case final String root) root,
+    // Flutter's Dart executable is in bin/cache/dart-sdk/bin.
+    p.dirname(p.dirname(p.dirname(dartSdk))),
+    for (final directory in (Platform.environment['PATH'] ?? '').split(
+      Platform.isWindows ? ';' : ':',
+    ))
+      if (directory.isNotEmpty && File(p.join(directory, getFlutterCommand())).existsSync())
+        p.dirname(
+          p.dirname(File(p.join(directory, getFlutterCommand())).resolveSymbolicLinksSync()),
+        ),
+  ];
+  return p.absolute(
+    candidates.firstWhere(
+      (String root) => File(p.join(root, 'bin', getFlutterCommand())).existsSync(),
+      orElse: () => throw StateError('Add Flutter to PATH or set FLUTTER_ROOT to the Flutter SDK.'),
+    ),
+  );
+}
 
 /// Returns the first device listed by `flutter devices` that targets
 /// [platform], or null if there is no such device.

@@ -80,13 +80,13 @@ ${parser.usage}''');
       iOSSwiftUnitTests,
       iOSSwiftIntegrationTests,
     ];
-    const linuxTests = <String>[linuxUnitTests, linuxIntegrationTests];
+    const linuxTests = <String>[linuxUnitTests, linuxIntegrationTests, cppNativeInteropTests];
     const macOSTests = <String>[
       macOSObjCIntegrationTests,
       macOSSwiftUnitTests,
       macOSSwiftIntegrationTests,
     ];
-    const windowsTests = <String>[windowsUnitTests, windowsIntegrationTests];
+    const windowsTests = <String>[windowsUnitTests, windowsIntegrationTests, cppNativeInteropTests];
 
     if (Platform.isMacOS) {
       testsToRun = <String>[...dartTests, ...androidTests, ...iOSTests, ...macOSTests];

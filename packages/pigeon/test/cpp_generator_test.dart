@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:io';
+
 import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:path/path.dart' as path;
 import 'package:pigeon/src/ast.dart';
 import 'package:pigeon/src/cpp/cpp_ffi_generator.dart';
 import 'package:pigeon/src/cpp/cpp_generator.dart';
@@ -10,6 +13,9 @@ import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/pigeon_lib.dart' show Error, ParseResults, Pigeon;
 import 'package:test/test.dart';
+
+import '../tool/shared/generation.dart';
+import '../tool/shared/native_project_runners.dart';
 
 const String DEFAULT_PACKAGE_NAME = 'test_package';
 
@@ -29,6 +35,132 @@ final Enum emptyEnum = Enum(
 );
 
 void main() {
+  test('native test tools use the explicitly selected executable and loader environment', () async {
+    final Directory temp = Directory.systemTemp.createTempSync('pigeon sdk path ');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final runner = File(path.join(temp.path, 'runner.dart'));
+    runner.writeAsStringSync(r'''
+import 'dart:io';
+void main(List<String> args) {
+  File('invocation').writeAsStringSync('${Platform.environment['PIGEON_TEST_LOADER']}|${args.join(',')}');
+}
+''');
+    expect(
+      await runFlutterCommand(
+        temp.path,
+        runner.path,
+        <String>['--release', 'argument with spaces'],
+        flutterExecutable: Platform.resolvedExecutable,
+        environment: <String, String>{'PIGEON_TEST_LOADER': 'library path with spaces'},
+      ),
+      0,
+    );
+    expect(
+      File(path.join(temp.path, 'invocation')).readAsStringSync(),
+      'library path with spaces|--release,argument with spaces',
+    );
+  });
+
+  test('Flutter SDK discovery honors FLUTTER_ROOT', () async {
+    final Directory temp = Directory.systemTemp.createTempSync('pigeon flutter sdk ');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final String sdk = path.join(temp.path, 'selected sdk');
+    final flutter = File(path.join(sdk, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'));
+    flutter.createSync(recursive: true);
+    final Uri helper = File('tool/shared/flutter_utils.dart').absolute.uri;
+    final runner = File(path.join(temp.path, 'runner.dart'));
+    runner.writeAsStringSync("import '$helper'; void main() { print(getFlutterSdkPath()); }");
+    for (final root in <String>[sdk, path.relative(sdk, from: temp.path)]) {
+      final ProcessResult result = await Process.run(
+        Platform.resolvedExecutable,
+        <String>['--packages=${File('.dart_tool/package_config.json').absolute.path}', runner.path],
+        workingDirectory: temp.path,
+        environment: <String, String>{'FLUTTER_ROOT': root},
+      );
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(result.stdout.toString().trim(), sdk);
+    }
+  });
+
+  test('shared generation produces the C++ native interop runtime fixture', () async {
+    final Directory output = Directory.systemTemp.createTempSync('pigeon cpp ffi ');
+    addTearDown(() => output.deleteSync(recursive: true));
+    expect(
+      await generateCppNativeInteropTest(
+        baseDir: Directory.current.path,
+        outputDirectory: output.path,
+      ),
+      0,
+    );
+    for (final name in <String>[
+      'messages.dart',
+      'messages.native_interop.dart',
+      'messages.h',
+      'messages.cpp',
+      'messages.ffi.h',
+      'messages.ffi.cpp',
+      'messages.ffigen.yaml',
+    ]) {
+      expect(File(path.join(output.path, name)).existsSync(), isTrue, reason: name);
+    }
+    final String companion = File(
+      path.join(output.path, 'messages.native_interop.dart'),
+    ).readAsStringSync();
+    expect(
+      companion,
+      contains(Platform.isWindows ? 'pigeon_cpp_test.dll' : 'libpigeon_cpp_test.so'),
+    );
+    expect(companion, contains('return _CppTestApiForCppNativeInterop(channelName)'));
+    expect(
+      File(path.join(output.path, 'messages.ffigen.yaml')).readAsStringSync(),
+      contains("output: 'messages.cpp_ffi.dart'"),
+    );
+  });
+
+  for (final scenario in <String>['pass', 'missing', 'failure', 'nonzero', 'stale', 'timeout']) {
+    test('C++ engine result validation: $scenario', () async {
+      final Directory temp = Directory.systemTemp.createTempSync('pigeon engine reports ');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final String saved = path.join(temp.path, 'saved');
+      Directory(saved).createSync();
+      for (final role in <String>['A', 'A2', 'B']) {
+        for (final directory in <String>[temp.path, saved]) {
+          File(path.join(directory, 'cpp_engine_$role.result')).writeAsStringSync('PASS stale');
+        }
+      }
+      final runner = File(path.join(temp.path, 'runner.dart'));
+      runner.writeAsStringSync(r'''
+import 'dart:io';
+void main(List<String> args) {
+  final scenario = args.single;
+  if (scenario == 'timeout') sleep(const Duration(seconds: 30));
+  if (scenario == 'stale') return;
+  for (final role in ['A', 'A2', 'B']) {
+    if (scenario == 'missing' && role == 'B') continue;
+    final status = scenario == 'failure' && role == 'B' ? 'FAIL' : 'PASS';
+    File('cpp_engine_$role.result').writeAsStringSync('$status $role');
+  }
+  if (scenario == 'nonzero') exit(3);
+}
+''');
+      final int result = await runCppNativeInteropEngineTest(
+        command: Platform.resolvedExecutable,
+        arguments: <String>[runner.path, scenario],
+        bundleDirectory: temp.path,
+        reportDirectory: saved,
+        timeout: scenario == 'timeout'
+            ? const Duration(milliseconds: 200)
+            : const Duration(seconds: 20),
+      );
+      expect(result == 0, scenario == 'pass');
+      if (scenario == 'stale' || scenario == 'timeout') {
+        expect(Directory(saved).listSync(), isEmpty);
+      } else if (scenario == 'pass') {
+        expect(File(path.join(saved, 'cpp_engine_B.result')).readAsStringSync(), 'PASS B');
+      }
+    });
+  }
+
   test('C++ FFI options round trip and default to disabled', () {
     expect(const CppOptions().useFfi, isFalse);
     final CppOptions options = CppOptions.fromMap(
@@ -39,7 +171,7 @@ void main() {
   });
 
   test('C++ native interop uses the shared hybrid transport and companion', () {
-    final ParseResults parsed = Pigeon.setup().parseFile('test/fixtures/cpp_native_interop.dart');
+    final ParseResults parsed = Pigeon.setup().parseFile('pigeons/cpp_native_interop_tests.dart');
     expect(parsed.errors, isEmpty);
     final Root root = parsed.root;
     const cpp = InternalCppOptions(
@@ -93,7 +225,7 @@ void main() {
 
   for (final (useFfi, useJni) in <(bool, bool)>[(true, false), (false, true), (true, true)]) {
     test('C++ complements configured Swift/JNI backends (Swift: $useFfi, JNI: $useJni)', () {
-      final ParseResults parsed = Pigeon.setup().parseFile('test/fixtures/cpp_native_interop.dart');
+      final ParseResults parsed = Pigeon.setup().parseFile('pigeons/cpp_native_interop_tests.dart');
       expect(parsed.errors, isEmpty);
       final companion = StringBuffer();
       const DartGenerator().generateNativeInterop(

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:convert' show jsonEncode;
 import 'dart:io' show Directory, File, Platform, Process, ProcessResult;
 
 import 'package:path/path.dart' as p;
@@ -12,6 +13,8 @@ import 'package:pigeon/src/generator_tools.dart';
 import 'process_utils.dart';
 
 enum GeneratorLanguage { cpp, dart, gobject, java, kotlin, objc, swift }
+
+const String cppNativeInteropTestDirectory = 'platform_tests/test_plugin/build/cpp_native_interop';
 
 // A map of pigeons/ files to the languages that they can't yet be generated
 // for due to limitations of that generator.
@@ -332,7 +335,72 @@ Future<int> generateTestPigeons({required String baseDir, bool includeOverflow =
     return generateCodeWithAnnotation;
   }
 
+  if (!includeOverflow && (Platform.isLinux || Platform.isWindows)) {
+    return generateCppNativeInteropTest(baseDir: baseDir);
+  }
   return 0;
+}
+
+/// Generates the C++ FFI fixture into the ignored build directory.
+///
+/// Its library name depends on the host, so it is regenerated for the runtime
+/// tests instead of checking in a platform-specific Dart companion.
+Future<int> generateCppNativeInteropTest({required String baseDir, String? outputDirectory}) async {
+  final String output = outputDirectory ?? p.join(baseDir, cppNativeInteropTestDirectory);
+  Directory(output).createSync(recursive: true);
+  return runPigeon(
+    input: p.join(baseDir, 'pigeons/cpp_native_interop_tests.dart'),
+    copyrightHeader: p.join(baseDir, 'copyright_header.txt'),
+    dartOut: p.join(output, 'messages.dart'),
+    cppHeaderOut: p.join(output, 'messages.h'),
+    cppSourceOut: p.join(output, 'messages.cpp'),
+    cppNamespace: 'cpp_test',
+    cppUseFfi: true,
+    cppFfiLibraryName: Platform.isWindows ? 'pigeon_cpp_test.dll' : 'libpigeon_cpp_test.so',
+    dartPackageName: 'cpp_test',
+    suppressVersion: true,
+  );
+}
+
+/// Generates bindings using FFIgen's normal discovery, or the configured LLVM.
+Future<int> generateCppNativeInteropBindings(
+  String outputDirectory, {
+  required String dartExecutable,
+}) async {
+  String? llvmPath = Platform.environment['LLVM_PATH'];
+  // The CI clang dependency is installed in a cache directory on PATH.
+  // Accept its libclang as well as FFIgen's standard system locations.
+  final libraryName = Platform.isWindows ? 'libclang.dll' : 'libclang.so';
+  if (llvmPath == null) {
+    for (final String directory in (Platform.environment['PATH'] ?? '').split(
+      Platform.isWindows ? ';' : ':',
+    )) {
+      if (directory.isEmpty) {
+        continue;
+      }
+      for (final candidate in <String>[
+        p.join(directory, libraryName),
+        p.join(p.dirname(directory), 'lib', libraryName),
+      ]) {
+        if (File(candidate).existsSync()) {
+          llvmPath = p.absolute(candidate);
+          break;
+        }
+      }
+      if (llvmPath != null) {
+        break;
+      }
+    }
+  }
+  String config = p.join(outputDirectory, 'messages.ffigen.yaml');
+  if (llvmPath != null) {
+    final String contents = File(config).readAsStringSync();
+    config = p.join(outputDirectory, 'messages.ffigen.test.yaml');
+    File(
+      config,
+    ).writeAsStringSync('$contents\nllvm-path:\n  - ${jsonEncode(p.absolute(llvmPath))}\n');
+  }
+  return runProcess(dartExecutable, <String>['run', 'ffigen', '--config', config]);
 }
 
 Future<int> runPigeon({
@@ -353,6 +421,8 @@ Future<int> runPigeon({
   String? cppHeaderOut,
   String? cppSourceOut,
   String? cppNamespace,
+  bool cppUseFfi = false,
+  String? cppFfiLibraryName,
   String? dartOut,
   String? dartTestOut,
   String? gobjectHeaderOut,
@@ -407,7 +477,11 @@ Future<int> runPigeon({
       dartOptions: const DartOptions(ignoreLints: false),
       cppHeaderOut: cppHeaderOut,
       cppSourceOut: cppSourceOut,
-      cppOptions: CppOptions(namespace: cppNamespace),
+      cppOptions: CppOptions(
+        namespace: cppNamespace,
+        useFfi: cppUseFfi,
+        ffiLibraryName: cppFfiLibraryName,
+      ),
       gobjectHeaderOut: injectOverflowTypes ? null : gobjectHeaderOut,
       gobjectSourceOut: injectOverflowTypes ? null : gobjectSourceOut,
       gobjectOptions: injectOverflowTypes ? null : GObjectOptions(module: gobjectModule),

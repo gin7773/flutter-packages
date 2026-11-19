@@ -22,7 +22,11 @@ Future<void> runTests(
 }) async {
   final String baseDir = p.dirname(p.dirname(Platform.script.toFilePath()));
   if (runGeneration) {
-    final int exitCode = await _runGenerate(baseDir, ciMode: ciMode);
+    final int exitCode = await _runGenerate(
+      baseDir,
+      ciMode: ciMode,
+      cppNativeInteropOnly: testsToRun.length == 1 && testsToRun.single == cppNativeInteropTests,
+    );
     if (exitCode != 0) {
       exit(exitCode);
     }
@@ -64,14 +68,14 @@ Future<int> _runGenerate(
   String baseDir, {
   required bool ciMode,
   bool includeOverflow = false,
+  bool cppNativeInteropOnly = false,
 }) async {
   // TODO(stuartmorgan): Consider making this conditional on the specific
   // tests being run, as not all of them need these files.
   _printHeading('Generating platform_test/ output', ciMode: ciMode);
-  final int generateExitCode = await generateTestPigeons(
-    baseDir: baseDir,
-    includeOverflow: includeOverflow,
-  );
+  final int generateExitCode = cppNativeInteropOnly
+      ? await generateCppNativeInteropTest(baseDir: baseDir)
+      : await generateTestPigeons(baseDir: baseDir, includeOverflow: includeOverflow);
   if (generateExitCode == 0) {
     print('Generation complete!');
   } else {

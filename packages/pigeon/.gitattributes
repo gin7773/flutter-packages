@@ -1,2 +1,0 @@
-# Keep the Linux verification entrypoint usable in Windows-origin checkouts.
-tool/test_cpp_native_interop.sh text eol=lf

@@ -6,7 +6,7 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Directory, File, Process, ProcessSignal;
+import 'dart:io' show Directory, File, Platform, Process, ProcessResult, ProcessSignal;
 
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
@@ -48,6 +48,8 @@ const String androidKotlinIntegrationTests = 'android_kotlin_integration_tests';
 // This name deliberately doesn't contain "integration", so that CI doesn't run
 // the suite again after generating overflow types, which these tests don't use.
 const String androidKotlinNativeInteropReleaseTests = 'android_kotlin_native_interop_release_tests';
+// Like the Kotlin release suite, these tests do not use overflow types.
+const String cppNativeInteropTests = 'cpp_native_interop_tests';
 const String iOSObjCUnitTests = 'ios_objc_unittests';
 const String iOSObjCIntegrationTests = 'ios_objc_integration_tests';
 const String iOSSwiftUnitTests = 'ios_swift_unittests';
@@ -64,6 +66,11 @@ const String flutterUnitTests = 'flutter_unittests';
 const String commandLineTests = 'command_line_tests';
 
 const Map<String, TestInfo> testSuites = <String, TestInfo>{
+  cppNativeInteropTests: TestInfo(
+    function: _runCppNativeInteropTests,
+    description:
+        'C++ FFI native, Dart, and multi-engine tests in Debug and Release (Windows/Linux).',
+  ),
   windowsUnitTests: TestInfo(
     function: _runWindowsUnitTests,
     description: 'Unit tests on generated Windows C++ code.',
@@ -559,6 +566,185 @@ Future<int> _runWindowsIntegrationTests({bool ciMode = false}) async {
     '-d',
     'windows',
   ]);
+}
+
+Future<int> _runCppNativeInteropTests({bool ciMode = false}) async {
+  if (!Platform.isLinux && !Platform.isWindows) {
+    print('The C++ engine test runners require Windows or Linux.');
+    return 1;
+  }
+  final platform = Platform.isWindows ? 'windows' : 'linux';
+  var architecture = 'x64';
+  if (Platform.isLinux) {
+    final ProcessResult result = await Process.run('uname', <String>['-m']);
+    architecture = switch ((result.stdout as String).trim()) {
+      'x86_64' => 'x64',
+      'aarch64' || 'arm64' => 'arm64',
+      _ => '',
+    };
+    if (result.exitCode != 0 || architecture.isEmpty) {
+      print('The Linux engine runner requires x64 or arm64.');
+      return 1;
+    }
+  }
+  final String sdk = getFlutterSdkPath();
+  final String flutter = p.join(sdk, 'bin', getFlutterCommand());
+  final String dart = p.join(
+    sdk,
+    'bin/cache/dart-sdk/bin',
+    Platform.isWindows ? 'dart.exe' : 'dart',
+  );
+  final String plugin = p.absolute(_testPluginRelativePath);
+  final String generated = p.absolute(cppNativeInteropTestDirectory);
+  final String fixture = p.join(plugin, 'test/cpp_native_interop');
+  final libraryName = Platform.isWindows ? 'pigeon_cpp_test.dll' : 'libpigeon_cpp_test.so';
+  int result = await runFlutterCommand('.', 'precache', <String>[
+    '--$platform',
+  ], flutterExecutable: flutter);
+  if (result != 0) {
+    return result;
+  }
+  result = await generateCppNativeInteropBindings(generated, dartExecutable: dart);
+  if (result != 0) {
+    return result;
+  }
+  final String wrapper = await getFlutterCppWrapper(sdk, generated);
+  result = await runFlutterCommand(plugin, 'pub', <String>['get'], flutterExecutable: flutter);
+  if (result != 0) {
+    return result;
+  }
+  File(p.join(fixture, 'runtime_test.dart.tmpl')).copySync(p.join(generated, 'runtime_test.dart'));
+
+  final String app = p.join(generated, 'engine_app_$platform');
+  if (!File(p.join(app, 'pubspec.yaml')).existsSync()) {
+    result = await runFlutterCommand('.', 'create', <String>[
+      '--platforms=$platform',
+      '--project-name=cpp_engine_test',
+      app,
+    ], flutterExecutable: flutter);
+    if (result != 0) {
+      return result;
+    }
+  }
+  result = await runFlutterCommand(app, 'pub', <String>['add', 'ffi'], flutterExecutable: flutter);
+  if (result != 0) {
+    return result;
+  }
+  for (final name in <String>[
+    'messages.dart',
+    'messages.native_interop.dart',
+    'messages.cpp_ffi.dart',
+  ]) {
+    File(p.join(generated, name)).copySync(p.join(app, 'lib', name));
+  }
+  File(p.join(fixture, 'multi_engine.dart.tmpl')).copySync(p.join(app, 'lib/main.dart'));
+  File(
+    p.join(fixture, Platform.isWindows ? 'multi_engine_main.cpp' : 'multi_engine_linux.cc'),
+  ).copySync(p.join(app, platform, 'runner', Platform.isWindows ? 'main.cpp' : 'main.cc'));
+  if (Platform.isLinux) {
+    File(
+      p.join(fixture, 'linux_runner.CMakeLists.txt'),
+    ).copySync(p.join(app, 'linux/runner/CMakeLists.txt'));
+  }
+
+  for (final configuration in <String>['Debug', 'Release']) {
+    final String native = p.join(generated, 'native-$platform', configuration);
+    for (final arguments in <List<String>>[
+      <String>[
+        '-S',
+        fixture,
+        '-B',
+        native,
+        if (Platform.isWindows) ...<String>['-A', 'x64'] else '-DCMAKE_BUILD_TYPE=$configuration',
+        '-DFLUTTER_WRAPPER_DIR=$wrapper',
+        '-DGENERATED_DIR=$generated',
+      ],
+      <String>['--build', native, '--config', configuration, '--parallel', '2'],
+    ]) {
+      result = await runProcess('cmake', arguments);
+      if (result != 0) {
+        return result;
+      }
+    }
+    result = await runProcess('ctest', <String>[
+      '--test-dir',
+      native,
+      '-C',
+      configuration,
+      '--output-on-failure',
+      '--verbose',
+    ]);
+    if (result != 0) {
+      return result;
+    }
+    final String libraryDirectory = Platform.isWindows ? p.join(native, configuration) : native;
+    final loaderPath = Platform.isWindows ? 'PATH' : 'LD_LIBRARY_PATH';
+    final separator = Platform.isWindows ? ';' : ':';
+    final environment = <String, String>{
+      loaderPath: <String>[
+        libraryDirectory,
+        if (Platform.environment[loaderPath] case final String value when value.isNotEmpty) value,
+      ].join(separator),
+    };
+    result = await runFlutterCommand(
+      plugin,
+      'test',
+      <String>['build/cpp_native_interop/runtime_test.dart', '--reporter', 'expanded'],
+      flutterExecutable: flutter,
+      environment: environment,
+    );
+    if (result != 0) {
+      return result;
+    }
+    final String mode = configuration.toLowerCase();
+    result = await runFlutterBuild(
+      app,
+      platform,
+      debug: false,
+      flags: <String>['--$mode'],
+      flutterExecutable: flutter,
+    );
+    if (result != 0) {
+      return result;
+    }
+    final String bundle = Platform.isWindows
+        ? p.join(app, 'build/windows/x64/runner', configuration)
+        : p.join(app, 'build/linux', architecture, mode, 'bundle');
+    final String bundledLibraryDirectory = Platform.isWindows ? bundle : p.join(bundle, 'lib');
+    File(
+      p.join(libraryDirectory, libraryName),
+    ).copySync(p.join(bundledLibraryDirectory, libraryName));
+    environment[loaderPath] = '$bundledLibraryDirectory$separator${environment[loaderPath]}';
+    final String executable = p.join(
+      bundle,
+      Platform.isWindows ? 'cpp_engine_test.exe' : 'cpp_engine_test',
+    );
+    for (final policy in <String>['--platform-ui', '--separate-ui']) {
+      final bool useXvfb =
+          Platform.isLinux &&
+          (ciMode ||
+              ((Platform.environment['DISPLAY'] ?? '').isEmpty &&
+                  (Platform.environment['WAYLAND_DISPLAY'] ?? '').isEmpty));
+      result = await runCppNativeInteropEngineTest(
+        command: Platform.isLinux ? 'timeout' : executable,
+        arguments: <String>[
+          // GNU timeout also terminates the Xvfb wrapper's process group.
+          if (Platform.isLinux) ...<String>['--kill-after=5s', '60s'],
+          if (useXvfb) ...<String>['xvfb-run', '-a', '-s', '-screen 0 1024x768x24'],
+          if (Platform.isLinux) executable,
+          policy,
+        ],
+        bundleDirectory: bundle,
+        reportDirectory: p.join(generated, 'reports', platform, configuration, policy.substring(2)),
+        environment: environment,
+      );
+      if (result != 0) {
+        return result;
+      }
+      print('PASS: two $platform engines, $configuration, $policy');
+    }
+  }
+  return 0;
 }
 
 Future<int> _runCommandLineTests({bool ciMode = false}) async {

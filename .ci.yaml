@@ -1014,9 +1014,12 @@ targets:
       target_file: windows_custom_package_tests.yaml
       channel: master
       version_file: flutter_master.version
+      # Pigeon C++ native interop generates FFIgen bindings and runs CMake/CTest.
       dependencies: >
         [
-          {"dependency": "vs_build", "version": "version:vs2019"}
+          {"dependency": "vs_build", "version": "version:vs2019"},
+          {"dependency": "clang", "version": "git_revision:5d5aba78dbbee75508f01bcaa69aedb2ab79065a"},
+          {"dependency": "cmake", "version": "build_id:8787856497187628321"}
         ]
 
   - name: Windows_x64 dart_unit_tests_shard_1 master

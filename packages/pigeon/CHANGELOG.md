@@ -1,7 +1,7 @@
 ## 30.1.0
 
 * [cpp] Adds experimental HostApi native interop using the shared hybrid transport, named registrations, and independently disposable sessions. The host supplies the native library without a generated operating-system restriction.
-* [cpp] Adds standalone Windows and Linux verification workflows for native, Flutter, and multi-engine tests.
+* [cpp] Adds native, Flutter, and multi-engine coverage to the Windows and Linux test suites.
 * [cpp] Fixes normal HostApi methods ignoring an injected C++ native interop instance and incorrectly using platform channels.
 
 ## 30.0.3

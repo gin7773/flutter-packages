@@ -187,6 +187,7 @@ Future<void> main(List<String> args) async {
     androidKotlinNativeInteropReleaseTests,
     linuxUnitTests,
     linuxIntegrationTests,
+    cppNativeInteropTests,
   ];
   const macOSHostTests = <String>[
     iOSObjCUnitTests,
@@ -202,7 +203,11 @@ Future<void> main(List<String> args) async {
     macOSSwiftIntegrationTests,
   ];
   // Run Windows tests on Windows, since that's the only place they can run.
-  const windowsHostTests = <String>[windowsUnitTests, windowsIntegrationTests];
+  const windowsHostTests = <String>[
+    windowsUnitTests,
+    windowsIntegrationTests,
+    cppNativeInteropTests,
+  ];
 
   _validateTestCoverage(<List<String>>[
     linuxHostTests,
