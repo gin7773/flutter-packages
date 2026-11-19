@@ -13,6 +13,7 @@ void writeCppNativeInterop(
   Root root,
   String library, {
   required String Function(String, TypeDeclaration) castValue,
+  required String Function(List<Parameter>) parameterSignature,
 }) {
   out.writeln(
     "final cpp_bindings.PigeonCppBindings _cppBindings = cpp_bindings.PigeonCppBindings(cpp_ffi.DynamicLibrary.open('${escapeStringSingleQuotes(library)}'));",
@@ -31,9 +32,7 @@ class _${api.name}ForCppNativeInterop implements ${api.name}ForNativeInterop {
 ''');
     for (final Method method in api.methods) {
       final TypeDeclaration t = method.returnType;
-      final String signature = method.parameters
-          .map((Parameter p) => '${addGenericTypes(p.type)} ${p.name}')
-          .join(', ');
+      final String signature = parameterSignature(method.parameters);
       final String type = addGenericTypes(t);
       final bool async = method.isAsynchronous;
       out.writeln('@override');
@@ -189,6 +188,7 @@ class _CppSession {
       final cpp_ffi.Pointer<cpp_ffi.Uint8> pointer = arena<cpp_ffi.Uint8>(bytes.isEmpty ? 1 : bytes.length);
       pointer.asTypedList(bytes.length).setAll(0, bytes);
       final int id = _cppDecode(connect(pointer, bytes.length), codec, 2)! as int;
+      if (id == 0) { _throwNoInstanceError(name); }
       return _CppSession(id, codec, disconnect);
     });
   }

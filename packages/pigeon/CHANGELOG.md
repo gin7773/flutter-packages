@@ -3,6 +3,7 @@
 * [cpp] Adds experimental HostApi native interop using the shared hybrid transport, named registrations, and independently disposable sessions. The host supplies the native library without a generated operating-system restriction.
 * [cpp] Adds native, Flutter, and multi-engine coverage to the Windows and Linux test suites.
 * [cpp] Fixes normal HostApi methods ignoring an injected C++ native interop instance and incorrectly using platform channels.
+* [cpp] Preserves named and optional parameters in native interop methods, and reports missing registrations with the same `ArgumentError` as Swift/JNI.
 
 ## 30.0.3
 

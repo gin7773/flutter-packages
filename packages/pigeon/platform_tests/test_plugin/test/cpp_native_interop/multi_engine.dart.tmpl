@@ -18,7 +18,7 @@ Future<void> main(List<String> args) async {
   try {
     api = CppTestApiForNativeInterop.getInstance(channelName: name)!;
     for (var i = 0; i < 100; ++i) {
-      if (api.add(i) != bias + i || await api.delayed(i) != i) {
+      if (api.add(i) != bias + i || await api.delayed(value: i) != i) {
         throw StateError('Wrong registration for $role');
       }
     }
@@ -27,7 +27,7 @@ Future<void> main(List<String> args) async {
         channelName: name,
       )!;
       try {
-        await child.delayed(42);
+        await child.delayed(value: 42);
         return child.add(1);
       } finally {
         child.pigeonDispose();

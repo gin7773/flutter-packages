@@ -177,8 +177,8 @@ class PigeonRegistry {
   int64_t Connect(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = registrations_.find(name);
-    if (it == registrations_.end())
-      throw std::invalid_argument("No FFI registration with this name.");
+    // Zero means no instance; Dart reports the same ArgumentError as Swift/JNI.
+    if (it == registrations_.end()) return 0;
     auto session = std::make_shared<Session>();
     session->registration = it->second;
     const auto id = NextId();

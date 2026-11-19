@@ -55,7 +55,9 @@ void main() {
     )!;
     try {
       expect(api.add(23), 123);
-      expect(api.sumWithNames(1, 2, 3, 4, 5), 15);
+      expect(api.sumWithNames(1, args: 2), 15);
+      expect(api.sumWithNames(1, args: 2, arena: 30, bytes: 40, id: 50), 123);
+      expect(api.echoInt(), 7);
       for (final int? value in <int?>[
         null,
         0,
@@ -101,7 +103,7 @@ void main() {
       expect((api.echoObject(box)! as Box).value, 31);
       api.ping();
       expect(api.fail, throwsA(isA<PlatformException>()));
-      expect(await api.delayed(42).timeout(const Duration(seconds: 5)), 42);
+      expect(await api.delayed(value: 42).timeout(const Duration(seconds: 5)), 42);
       expect((await api.asyncBox(box)).value, 31);
       await api.asyncVoid();
     } finally {
@@ -123,7 +125,11 @@ void main() {
       expect(register('engine-a', 999), 0);
       expect(
         () => CppTestApiForNativeInterop.getInstance(channelName: 'missing'),
-        throwsA(isA<PlatformException>()),
+        throwsArgumentError,
+      );
+      expect(
+        () => CppTestApi.createWithNativeInteropApi(messageChannelSuffix: 'missing'),
+        throwsArgumentError,
       );
       first.pigeonDispose();
       first.pigeonDispose();
@@ -184,7 +190,7 @@ void main() {
           )!;
           try {
             final int result = api.add(1);
-            await api.delayed(2);
+            await api.delayed(value: 2);
             return result;
           } finally {
             api.pigeonDispose();
@@ -199,7 +205,9 @@ void main() {
     final CppTestApi api = CppTestApi.createWithNativeInteropApi(messageChannelSuffix: 'engine-a');
     try {
       expect(await api.add(1), 101);
-      expect(await api.delayed(42).timeout(const Duration(seconds: 5)), 42);
+      expect(await api.delayed(value: 42).timeout(const Duration(seconds: 5)), 42);
+      expect(await api.sumWithNames(1, args: 2), 15);
+      expect(await api.echoInt(), 7);
       await api.ping();
       await api.asyncVoid().timeout(const Duration(seconds: 5));
     } finally {

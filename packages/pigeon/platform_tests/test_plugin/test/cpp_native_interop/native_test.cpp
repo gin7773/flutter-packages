@@ -78,6 +78,9 @@ int main() {
   const auto sb = Connect("engine-b");
   CHECK(s1 && s2 && sb && s1 != s2);
   CHECK(Connect("missing") == 0);
+  auto* missing = API(connect)(reinterpret_cast<const uint8_t*>("missing"), 7);
+  CHECK(missing && !missing->is_error && missing->integer == 0);
+  FREE(missing);
   PigeonCppValue arg{};
   arg.integer = 42;
   auto* value = API(3_add)(s1, &arg);

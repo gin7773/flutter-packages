@@ -3489,6 +3489,9 @@ ${api.name}({
     );
     if (generatorOptions.useJni || generatorOptions.useFfi) {
       _writeNativeInteropGeneralUtilities(generatorOptions, root, indent);
+    } else if (generatorOptions.cppFfiLibraryName != null) {
+      _writeNoInstanceError(indent);
+      indent.newln();
     }
     if (generatorOptions.cppFfiLibraryName != null) {
       writeCppNativeInterop(
@@ -3496,6 +3499,7 @@ ${api.name}({
         root,
         generatorOptions.cppFfiLibraryName!,
         castValue: _castValue,
+        parameterSignature: _getMethodParameterSignature,
       );
     }
     for (final Enum anEnum in root.enums) {
@@ -3664,15 +3668,7 @@ ${api.name}({
 
     indent.writeln('bool _isTypeOrNullableType<T>(Type t) => _isType<T>(t) || _isType<T?>(t);');
     indent.newln();
-    indent.format('''
-void _throwNoInstanceError(String channelName) {
-\tString nameString = 'named \$channelName';
-\tif (channelName == defaultInstanceName) {
-\t\tnameString = 'with no name';
-\t}
-\tfinal String error = 'No instance \$nameString has been registered.';
-\tthrow ArgumentError(error);
-}''');
+    _writeNoInstanceError(indent);
     if (_hasNativeInteropEngineKeyedApis(root)) {
       indent.newln();
       indent.format('''
@@ -3705,6 +3701,18 @@ int? _pigeonEngineAffinity;''');
     }
     _writeErrorHelpers(indent, generatorOptions);
     indent.newln();
+  }
+
+  void _writeNoInstanceError(Indent indent) {
+    indent.format('''
+void _throwNoInstanceError(String channelName) {
+\tString nameString = 'named \$channelName';
+\tif (channelName == defaultInstanceName) {
+\t\tnameString = 'with no name';
+\t}
+\tfinal String error = 'No instance \$nameString has been registered.';
+\tthrow ArgumentError(error);
+}''');
   }
 
   void _writeJniCodec(Indent indent, Root root) {

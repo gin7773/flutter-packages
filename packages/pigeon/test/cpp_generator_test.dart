@@ -202,7 +202,7 @@ void main(List<String> args) {
     expect(main.toString(), isNot(contains("import 'dart:ffi'")));
     expect(main.toString(), contains('if (_nativeInteropApi != null)'));
     expect(main.toString(), contains('return _nativeInteropApi.add(value);'));
-    expect(main.toString(), contains('return _nativeInteropApi.delayed(value);'));
+    expect(main.toString(), contains('return _nativeInteropApi.delayed(value: value);'));
     expect(main.toString(), contains('return _nativeInteropApi.ping();'));
     expect(main.toString(), contains('return _nativeInteropApi.asyncVoid();'));
     final companion = StringBuffer();
@@ -219,6 +219,18 @@ void main(List<String> args) {
     expect(companion.toString(), isNot(contains('UnsupportedError')));
     expect(companion.toString(), contains('NativeCallable<_CppReplyNative>.listener'));
     expect(companion.toString(), contains('void pigeonDispose() => _session.dispose()'));
+    expect(companion.toString(), contains('int? echoInt([int? value = 7])'));
+    expect(companion.toString(), contains('Future<int> delayed({required int value})'));
+    expect(
+      companion.toString(),
+      matches(
+        RegExp(
+          r'int sumWithNames\(\s*int result,\s*\{\s*required int args,\s*int arena = 3,\s*int bytes = 4,\s*int id = 5,?\s*\}\s*\)',
+        ),
+      ),
+    );
+    expect(companion.toString(), contains('if (id == 0) {\n        _throwNoInstanceError(name);'));
+    expect(companion.toString(), contains('throw ArgumentError(error);'));
     parseString(content: main.toString());
     parseString(content: companion.toString());
   });
@@ -257,6 +269,7 @@ void main(List<String> args) {
         matches(RegExp(r'\} else \{\s+return _CppTestApiForCppNativeInterop\(channelName\);\s+\}')),
       );
       expect(code, contains("DynamicLibrary.open('libtest.so')"));
+      expect('void _throwNoInstanceError('.allMatches(code), hasLength(1));
     });
   }
 

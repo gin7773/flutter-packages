@@ -15,8 +15,8 @@ class Box {
 @HostApi()
 abstract class CppTestApi {
   int add(int value);
-  int sumWithNames(int result, int args, int arena, int bytes, int id);
-  int? echoInt(int? value);
+  int sumWithNames(int result, {required int args, int arena = 3, int bytes = 4, int id = 5});
+  int? echoInt([int? value = 7]);
   bool echoBool(bool value);
   double echoDouble(double value);
   String? echoString(String? value);
@@ -33,7 +33,7 @@ abstract class CppTestApi {
   void ping();
   void fail();
   @async
-  int delayed(int value);
+  int delayed({required int value});
   @asyncCallback
   int pending(int value);
   @async
