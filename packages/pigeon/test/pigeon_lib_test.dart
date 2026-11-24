@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as path;
 import 'package:pigeon/src/ast.dart';
+import 'package:pigeon/src/cpp/cpp_generator.dart';
 import 'package:pigeon/src/dart/dart_generator.dart';
 import 'package:pigeon/src/generator_tools.dart';
 import 'package:pigeon/src/kotlin/jnigen_config_generator.dart';
@@ -2160,6 +2161,92 @@ abstract class Api {
         expect(result, isNot(0));
       });
     });
+  });
+
+  group('C++ FFIgen orchestration', () {
+    for (final scenario in <String>['success', 'failure', 'start failure', 'disabled', 'invalid']) {
+      test(scenario, () async {
+        final Directory temp = Directory.systemTemp.createTempSync('pigeon cpp bindings ');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final ParseResults parsed = parseSource('''
+@HostApi()
+abstract class Api {
+  int add(int value);
+}
+''');
+        final logs = <String>[];
+        var bindingRuns = 0;
+        final int result = await runZoned(
+          () => Pigeon.runWithOptions(
+            PigeonOptions(
+              input: 'unused.dart',
+              basePath: temp.path,
+              dartOut: 'lib/generated/messages.dart',
+              cppHeaderOut: 'native/generated/messages.h',
+              cppSourceOut: 'native/generated/messages.cpp',
+              dartPackageName: 'test_package',
+              cppOptions: CppOptions(
+                useFfi: scenario != 'disabled',
+                ffiLibraryName: scenario == 'invalid' ? null : 'test_library',
+              ),
+            ),
+            parseResults: parsed,
+            cppFfigenRunner: (String executable, List<String> arguments) async {
+              bindingRuns++;
+              expect(executable, Platform.resolvedExecutable);
+              expect(arguments, <String>[
+                'run',
+                'ffigen',
+                '--config',
+                path.posix.join(temp.path, 'native/generated/messages.ffigen.yaml'),
+              ]);
+              expect(
+                File(arguments.last).readAsStringSync(),
+                contains("output: '../../lib/generated/messages.cpp_ffi.dart'"),
+              );
+              // Bindings must be generated only after both adapter files are complete.
+              for (final name in <String>[
+                'messages.h',
+                'messages.cpp',
+                'messages.ffi.h',
+                'messages.ffi.cpp',
+              ]) {
+                expect(
+                  File(path.join(temp.path, 'native/generated', name)).readAsStringSync(),
+                  isNotEmpty,
+                );
+              }
+              if (scenario == 'start failure') {
+                throw ProcessException(executable, arguments, 'cannot start test process');
+              }
+              return ProcessResult(
+                0,
+                scenario == 'failure' ? 7 : 0,
+                'header parsing failed',
+                'tool diagnostic',
+              );
+            },
+          ),
+          zoneSpecification: ZoneSpecification(
+            print: (Zone self, ZoneDelegate parent, Zone zone, String line) => logs.add(line),
+          ),
+        );
+        expect(bindingRuns, scenario == 'disabled' || scenario == 'invalid' ? 0 : 1);
+        switch (scenario) {
+          case 'failure':
+            expect(result, 7);
+            expect(logs.join('\n'), contains('header parsing failed'));
+            expect(logs.join('\n'), contains('tool diagnostic'));
+          case 'start failure':
+            expect(result, 1);
+            expect(logs.join('\n'), contains('cannot start test process'));
+          case 'invalid':
+            expect(result, 1);
+          default:
+            expect(result, 0);
+        }
+      });
+    }
   });
 
   group('Dependency Validation', () {

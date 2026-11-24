@@ -345,7 +345,11 @@ Future<int> generateTestPigeons({required String baseDir, bool includeOverflow =
 ///
 /// Its library name depends on the host, so it is regenerated for the runtime
 /// tests instead of checking in a platform-specific Dart companion.
-Future<int> generateCppNativeInteropTest({required String baseDir, String? outputDirectory}) async {
+Future<int> generateCppNativeInteropTest({
+  required String baseDir,
+  String? outputDirectory,
+  Future<ProcessResult> Function(String, List<String>)? cppFfigenRunner,
+}) async {
   final String output = outputDirectory ?? p.join(baseDir, cppNativeInteropTestDirectory);
   Directory(output).createSync(recursive: true);
   return runPigeon(
@@ -356,17 +360,18 @@ Future<int> generateCppNativeInteropTest({required String baseDir, String? outpu
     cppSourceOut: p.join(output, 'messages.cpp'),
     cppNamespace: 'cpp_test',
     cppUseFfi: true,
+    cppFfigenRunner: cppFfigenRunner ?? _runCppNativeInteropFfigen,
     cppFfiLibraryName: Platform.isWindows ? 'pigeon_cpp_test.dll' : 'libpigeon_cpp_test.so',
     dartPackageName: 'cpp_test',
     suppressVersion: true,
   );
 }
 
-/// Generates bindings using FFIgen's normal discovery, or the configured LLVM.
-Future<int> generateCppNativeInteropBindings(
-  String outputDirectory, {
-  required String dartExecutable,
-}) async {
+// Use the normal generation flow, with the CI toolchain's LLVM location.
+Future<ProcessResult> _runCppNativeInteropFfigen(
+  String dartExecutable,
+  List<String> arguments,
+) async {
   String? llvmPath = Platform.environment['LLVM_PATH'];
   // The CI clang dependency is installed in a cache directory on PATH.
   // Accept its libclang as well as FFIgen's standard system locations.
@@ -392,15 +397,15 @@ Future<int> generateCppNativeInteropBindings(
       }
     }
   }
-  String config = p.join(outputDirectory, 'messages.ffigen.yaml');
+  String config = arguments.last;
   if (llvmPath != null) {
     final String contents = File(config).readAsStringSync();
-    config = p.join(outputDirectory, 'messages.ffigen.test.yaml');
+    config = p.join(p.dirname(config), 'messages.ffigen.test.yaml');
     File(
       config,
     ).writeAsStringSync('$contents\nllvm-path:\n  - ${jsonEncode(p.absolute(llvmPath))}\n');
   }
-  return runProcess(dartExecutable, <String>['run', 'ffigen', '--config', config]);
+  return Process.run(dartExecutable, <String>[...arguments.take(arguments.length - 1), config]);
 }
 
 Future<int> runPigeon({
@@ -423,6 +428,7 @@ Future<int> runPigeon({
   String? cppNamespace,
   bool cppUseFfi = false,
   String? cppFfiLibraryName,
+  Future<ProcessResult> Function(String, List<String>)? cppFfigenRunner,
   String? dartOut,
   String? dartTestOut,
   String? gobjectHeaderOut,
@@ -513,6 +519,8 @@ Future<int> runPigeon({
     ),
     // ignore: invalid_use_of_visible_for_testing_member
     parseResults: injectOverflowTypes ? parseResults : null,
+    // ignore: invalid_use_of_visible_for_testing_member
+    cppFfigenRunner: cppFfigenRunner,
     mergeDefinitionFileOptions: mergeDefinitionFileOptions,
   );
   includeVersionInGeneratedWarning = originalWarningSetting;

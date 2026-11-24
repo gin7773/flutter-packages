@@ -375,7 +375,7 @@ String _cppType(TypeDeclaration t, String? namespace) => switch (t.baseName) {
   _ => '${namespace == null ? '' : '$namespace::'}${t.baseName}',
 };
 
-/// Writes ffigen configuration; ffigen is run explicitly by the build workflow.
+/// Writes the configuration used by Pigeon's automatic FFIgen invocation.
 void generateCppFfiConfig(
   InternalCppOptions options,
   String dartOut,

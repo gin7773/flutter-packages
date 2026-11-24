@@ -55,7 +55,8 @@ class CppOptions {
     this.ffiLibraryName,
   });
 
-  /// Whether to generate C++ native interop adapters.
+  /// Whether to generate C++ native interop adapters and run FFIgen.
+  /// Requires FFIgen in the consuming package's dev dependencies and LLVM.
   final bool useFfi;
 
   /// The shared library containing the generated adapter's exported symbols.

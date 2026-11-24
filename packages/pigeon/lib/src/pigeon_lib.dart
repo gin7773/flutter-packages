@@ -19,6 +19,7 @@ import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:path/path.dart' as path;
 
 import 'ast.dart';
+import 'cpp/cpp_ffi_generator.dart';
 import 'cpp/cpp_generator.dart';
 import 'dart/dart_generator.dart';
 import 'generator_tools.dart' as generator_tools;
@@ -842,6 +843,7 @@ ${_argParser.usage}''';
     String? sdkPath,
     bool mergeDefinitionFileOptions = true,
     @visibleForTesting ParseResults? parseResults,
+    @visibleForTesting Future<ProcessResult> Function(String, List<String>)? cppFfigenRunner,
   }) async {
     final Pigeon pigeon = Pigeon.setup();
     if (options.debugGenerators ?? false) {
@@ -945,6 +947,21 @@ ${_argParser.usage}''';
       }
     }
 
+    if (internalOptions.cppOptions?.useFfi ?? false) {
+      final String configFile = path.posix.join(
+        internalOptions.basePath ?? '',
+        cppFfiConfig(internalOptions.cppOptions!.cppHeaderOut),
+      );
+      final int exitCode = await _runCppFfigen(
+        configFile,
+        dartExecutable,
+        cppFfigenRunner ?? Process.run,
+      );
+      if (exitCode != 0) {
+        return exitCode;
+      }
+    }
+
     if (useFfi) {
       if (!Platform.isMacOS) {
         print('FFI Multi-step: Skipping FFIgen on non-macOS platform.');
@@ -1019,6 +1036,34 @@ ${_argParser.usage}''';
         stderr.writeln('Error: ${err.message}');
       }
     }
+  }
+
+  /// Generates Dart bindings after the C++ adapter files have been written.
+  static Future<int> _runCppFfigen(
+    String configFile,
+    String dartExecutable,
+    Future<ProcessResult> Function(String, List<String>) runProcess,
+  ) async {
+    print('C++ FFI: Running FFIgen for $configFile...');
+    final ProcessResult result;
+    try {
+      result = await runProcess(dartExecutable, <String>['run', 'ffigen', '--config', configFile]);
+    } on ProcessException catch (e) {
+      print('Error: Failed to start C++ FFIgen ($configFile): $e');
+      return 1;
+    }
+    if (result.exitCode != 0) {
+      print('Error: C++ FFIgen failed for $configFile (exit code ${result.exitCode}).');
+      for (final output in <String>[result.stdout.toString(), result.stderr.toString()]) {
+        final String message = output.trim();
+        if (message.isNotEmpty) {
+          print(message);
+        }
+      }
+      return result.exitCode;
+    }
+    print('C++ FFI: FFIgen completed successfully.');
+    return 0;
   }
 
   /// Runs FFIgen in FFI multi-step generation.

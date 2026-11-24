@@ -4,6 +4,7 @@
 * [cpp] Adds native, Flutter, and multi-engine coverage to the Windows and Linux test suites.
 * [cpp] Fixes normal HostApi methods ignoring an injected C++ native interop instance and incorrectly using platform channels.
 * [cpp] Preserves named and optional parameters in native interop methods, and reports missing registrations with the same `ArgumentError` as Swift/JNI.
+* [cpp] Runs FFIgen automatically after generating native interop adapters and reports binding generation failures.
 
 ## 30.0.3
 

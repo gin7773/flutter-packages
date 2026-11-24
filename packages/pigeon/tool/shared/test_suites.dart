@@ -589,11 +589,6 @@ Future<int> _runCppNativeInteropTests({bool ciMode = false}) async {
   }
   final String sdk = getFlutterSdkPath();
   final String flutter = p.join(sdk, 'bin', getFlutterCommand());
-  final String dart = p.join(
-    sdk,
-    'bin/cache/dart-sdk/bin',
-    Platform.isWindows ? 'dart.exe' : 'dart',
-  );
   final String plugin = p.absolute(_testPluginRelativePath);
   final String generated = p.absolute(cppNativeInteropTestDirectory);
   final String fixture = p.join(plugin, 'test/cpp_native_interop');
@@ -601,10 +596,6 @@ Future<int> _runCppNativeInteropTests({bool ciMode = false}) async {
   int result = await runFlutterCommand('.', 'precache', <String>[
     '--$platform',
   ], flutterExecutable: flutter);
-  if (result != 0) {
-    return result;
-  }
-  result = await generateCppNativeInteropBindings(generated, dartExecutable: dart);
   if (result != 0) {
     return result;
   }

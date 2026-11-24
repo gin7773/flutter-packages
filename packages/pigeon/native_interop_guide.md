@@ -346,17 +346,20 @@ build will produce:
 ```
 
 Add `ffi` to the consuming package's dependencies and `ffigen` to its dev
-dependencies, then generate the bridge and bindings:
+dependencies, and install LLVM for FFIgen. Generate the bridge and bindings
+with one command:
 
 ```sh
 dart run pigeon --input pigeons/messages.dart
-dart run ffigen --config native/messages.ffigen.yaml
 ```
 
 Pigeon adds `messages.ffi.h`, `messages.ffi.cpp`, and `messages.ffigen.yaml`
 beside the normal C++ outputs, and `messages.native_interop.dart` beside the
-Dart output. FFIgen produces `lib/messages.cpp_ffi.dart`. Configure `llvm-path`
-in the generated YAML if LLVM is not discoverable.
+Dart output. Pigeon then runs FFIgen to produce `lib/messages.cpp_ffi.dart`.
+If FFIgen fails, Pigeon reports its diagnostics and exits with a nonzero status.
+For troubleshooting, you can adjust `llvm-path` or `compiler-opts` in the
+generated YAML and run `dart run ffigen --config native/messages.ffigen.yaml`
+directly. The YAML is regenerated on the next Pigeon run.
 
 The host build compiles both `messages.cpp` and `messages.ffi.cpp` using C++17
 with exceptions enabled (`/EHsc` and `_HAS_EXCEPTIONS=1` for MSVC). Supply

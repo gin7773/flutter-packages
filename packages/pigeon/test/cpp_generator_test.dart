@@ -85,13 +85,22 @@ void main(List<String> args) {
   test('shared generation produces the C++ native interop runtime fixture', () async {
     final Directory output = Directory.systemTemp.createTempSync('pigeon cpp ffi ');
     addTearDown(() => output.deleteSync(recursive: true));
+    var bindingRuns = 0;
     expect(
       await generateCppNativeInteropTest(
         baseDir: Directory.current.path,
         outputDirectory: output.path,
+        cppFfigenRunner: (String executable, List<String> arguments) async {
+          bindingRuns++;
+          expect(executable, Platform.resolvedExecutable);
+          expect(arguments.take(3), <String>['run', 'ffigen', '--config']);
+          expect(File(arguments.last).existsSync(), isTrue);
+          return ProcessResult(0, 0, '', '');
+        },
       ),
       0,
     );
+    expect(bindingRuns, 1);
     for (final name in <String>[
       'messages.dart',
       'messages.native_interop.dart',
